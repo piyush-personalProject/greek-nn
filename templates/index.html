@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FX Greeks Risk Dashboard</title>
+    <link rel="stylesheet" href="/static/css/greeks.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>FX Greeks Risk Dashboard</h1>
+                <span class="subtitle">Front Office Trading Risk</span>
+            </div>
+            <div class="header-right">
+                <div class="connection-status" id="wsStatus">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-text">Disconnected</span>
+                </div>
+                <div class="timestamp" id="lastUpdate">--:--:--</div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel: Portfolio Overview -->
+            <aside class="panel panel-left">
+                <div class="panel-header">
+                    <h2>Portfolio Overview</h2>
+                    <select id="portfolioSelect" class="portfolio-select">
+                        <option value="FX-PORTFOLIO-01">FX Portfolio 01</option>
+                    </select>
+                </div>
+                
+                <!-- Spot Rates -->
+                <div class="section">
+                    <h3>Spot Rates</h3>
+                    <div class="spot-rates" id="spotRates">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Total Greeks -->
+                <div class="section">
+                    <h3>Total Greeks (Spot Horizon)</h3>
+                    <div class="greeks-grid" id="totalGreeks">
+                        <div class="greek-item">
+                            <span class="greek-label">Delta</span>
+                            <span class="greek-value" id="delta">--</span>
+                        </div>
+                        <div class="greek-item">
+                            <span class="greek-label">Gamma</span>
+                            <span class="greek-value" id="gamma">--</span>
+                        </div>
+                        <div class="greek-item">
+                            <span class="greek-label">Vega</span>
+                            <span class="greek-value" id="vega">--</span>
+                        </div>
+                        <div class="greek-item">
+                            <span class="greek-label">Theta</span>
+                            <span class="greek-value" id="theta">--</span>
+                        </div>
+                        <div class="greek-item">
+                            <span class="greek-label">Rho</span>
+                            <span class="greek-value" id="rho">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Vol Surface -->
+                <div class="section">
+                    <h3>Vol Surface (ATM)</h3>
+                    <div class="vol-surface" id="volSurface">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center Panel: Time Ladder -->
+            <main class="panel panel-center">
+                <div class="panel-header">
+                    <h2>Time Ladder</h2>
+                    <div class="greek-selector">
+                        <label>Greek:</label>
+                        <select id="ladderGreekSelect">
+                            <option value="vega" selected>Vega</option>
+                            <option value="delta">Delta</option>
+                            <option value="gamma">Gamma</option>
+                            <option value="theta">Theta</option>
+                            <option value="rho">Rho</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Time Ladder Chart -->
+                <div class="chart-container">
+                    <canvas id="ladderChart"></canvas>
+                </div>
+
+                <!-- Time Ladder Table -->
+                <div class="ladder-table-container">
+                    <table class="ladder-table">
+                        <thead>
+                            <tr>
+                                <th>Tenor</th>
+                                <th>Delta</th>
+                                <th>Gamma</th>
+                                <th>Vega</th>
+                                <th>Theta</th>
+                                <th>Rho</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ladderTableBody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </main>
+
+            <!-- Right Panel: Trades/Positions -->
+            <aside class="panel panel-right">
+                <div class="panel-header">
+                    <h2>Trades / Positions</h2>
+                    <button class="btn btn-primary" id="addTradeBtn">+ Add Trade</button>
+                </div>
+
+                <!-- Positions List -->
+                <div class="positions-list" id="positionsList">
+                    <!-- Populated by JS -->
+                </div>
+            </aside>
+        </div>
+
+        <!-- Bottom Panel: News Feed -->
+        <div class="news-panel" id="newsPanel">
+            <div class="panel-header">
+                <h2>Market News & Impact</h2>
+                <div class="news-filter">
+                    <input type="text" id="newsSearchInput" placeholder="Filter news...">
+                </div>
+                <button class="btn btn-small" id="showImpactBtn">Show Impact</button>
+            </div>
+            <div class="news-impact-summary" id="newsImpactSummary" style="display: none;">
+                <span class="baseline-label">Baseline Vega:</span>
+                <span class="baseline-value" id="baselineVega">--</span>
+            </div>
+            <div class="news-list" id="newsList">
+                <!-- Populated by JS -->
+            </div>
+            <div class="news-impact-list" id="newsImpactList" style="display: none;">
+                <!-- Populated by JS with impact data -->
+            </div>
+        </div>
+
+        <!-- Maker/Dealer Trade Entry Modal -->
+        <div class="modal" id="tradeModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Add New Trade</h2>
+                    <button class="close-btn" id="closeModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="tradeForm">
+                        <div class="form-group">
+                            <label>Instrument</label>
+                            <select id="tradeInstrument" required>
+                                <option value="EURUSD">EUR/USD</option>
+                                <option value="USDJPY">USD/JPY</option>
+                                <option value="GBPUSD">GBP/USD</option>
+                                <option value="USDCHF">USD/CHF</option>
+                                <option value="AUDUSD">AUD/USD</option>
+                                <option value="USDCAD">USD/CAD</option>
+                                <option value="NZDUSD">NZD/USD</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Strike</label>
+                                <input type="number" id="tradeStrike" step="0.0001" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Tenor</label>
+                                <select id="tradeTenor" required>
+                                    <option value="0.0192">1 Week</option>
+                                    <option value="0.0833">1 Month</option>
+                                    <option value="0.25">3 Months</option>
+                                    <option value="0.5">6 Months</option>
+                                    <option value="1.0">1 Year</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Quantity</label>
+                                <input type="number" id="tradeQuantity" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Option Type</label>
+                                <select id="tradeOptionType" required>
+                                    <option value="CALL">Call</option>
+                                    <option value="PUT">Put</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Trade</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Risk Alerts -->
+        <div class="alerts-container" id="alertsContainer">
+            <!-- Alerts will appear here -->
+        </div>
+    </div>
+
+    <script src="/static/js/greeks_ui.js"></script>
+</body>
+</html>
