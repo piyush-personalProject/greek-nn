@@ -1,22 +1,56 @@
 # GreekNN Risk System
 
-A real-time neural network-based portfolio risk management system with a FastAPI backend for front-office trader UI. Provides real-time Greeks visualization, spot horizon views, and time ladder analysis.
+A real-time neural network-based portfolio risk management system with a FastAPI backend for front-office trader UI. Provides real-time Greeks visualization, spot horizon views, time ladder analysis, and **news-driven risk assessment**.
 
 ## Overview
 
 The GreekNN Risk System is a modular Python library designed for financial institutions to perform portfolio risk analysis. It integrates news ingestion, NLP-based event processing, volatility shock modeling, and neural network-based Greeks computation with a web-based UI.
 
-**Status:** Core Python modules implemented. FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization.
+**Status:** All core Python modules implemented. FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization and news impact analysis.
 
 ## Key Features
 
 - **Real-time News Ingestion**: Aggregates headlines from NewsAPI and RSS feeds (MAS, Fed, ECB)
-- **NLP Event Processing**: Extracts structured event vectors using FinBERT sentiment analysis (when NLP model available)
+- **NLP Event Processing**: Extracts structured event vectors using FinBERT sentiment analysis
 - **Vol Shock Modeling**: Predicts volatility surface changes from economic events
+- **News Impact Analysis**: Calculates which news events impact portfolio Greeks
 - **NN Risk Engine**: Computes portfolio Greeks (Delta, Gamma, Vega, Theta, Rho) using ONNX/PyTorch/Black-Scholes
 - **Multi-tier Caching**: Memory → Redis → Disk for low-latency surface retrieval
 - **FastAPI Backend**: REST API with WebSocket support for real-time updates
 - **Web UI**: Dashboard for portfolio management and Greeks visualization
+
+## News-Driven Risk Assessment
+
+The system provides a complete news-to-risk pipeline:
+
+```
+News Headline → NLP Engine → Vol Shock Model → Vol Surface Service → Risk Engine → Greeks Impact
+     │               │                │                │                  │              │
+     ▼               ▼                ▼                ▼                  ▼              ▼
+┌─────────┐   ┌───────────┐   ┌───────────┐   ┌───────────────┐   ┌──────────┐   ┌────────┐
+│Reuters  │──▶│FinBERT    │──▶│Neural Net │──▶│Apply Shock    │──▶│Black-    │──▶│Dashboard│
+│Bloomberg│   │Sentiment  │   │Vol Impact │   │to Surface     │   │Scholes   │   │Update  │
+│MAS/Fed  │   │+ Entities │   │Prediction │   │Vol × (1 + Δ)  │   │Greeks    │   │        │
+└─────────┘   └───────────┘   └───────────┘   └───────────────┘   └──────────┘   └────────┘
+```
+
+### Example: Fed Rate Decision Impact
+
+```
+Headline: "Fed signals potential rate cuts amid cooling inflation data"
+         │
+         ▼
+Event Type: INTEREST_RATE | Sentiment: NEGATIVE (-0.73) | Importance: 0.82
+         │
+         ▼
+Vol Shock: 1M ATM = -0.31% (vol decreases on rate cut expectation)
+         │
+         ▼
+Portfolio Impact:
+  - Delta: -$2,000 (currency appreciation expected)
+  - Vega: -$3,000 (lower vol reduces option values)
+  - Gamma: -$500 (delta exposure reduced)
+```
 
 ## Project Structure
 
@@ -27,6 +61,8 @@ greek_nn/
 ├── logger.py                 # Structured logging setup
 ├── schemas.py                # Pydantic models and data classes
 ├── news_ingestion.py         # Module 1: News Ingestion Service
+├── nlp_engine.py            # Module 2: NLP Processing with FinBERT
+├── vol_shock_model.py       # Module 3: Volatility Shock Prediction
 ├── nn_risk_engine.py         # Module 5: Neural Network Risk Engine
 ├── vol_surface_service.py    # Module 4: Vol Surface Service
 ├── requirements.txt          # Python dependencies
@@ -41,7 +77,7 @@ greek_nn/
 │   └── js/
 │       └── greeks_ui.js     # Greeks visualization JS
 ├── docs/                    # Documentation
-│   ├── ARCHITECTURE.md      # System architecture
+│   ├── ARCHITECTURE.md      # System architecture (with wireframes)
 │   ├── API.md               # API reference
 │   └── TRACEABILITY.md     # Requirements traceability
 └── tests/                   # Unit tests
@@ -50,6 +86,8 @@ greek_nn/
     ├── test_nn_risk_engine.py
     ├── test_vol_surface.py
     ├── test_news_ingestion.py
+    ├── test_nlp_engine.py
+    ├── test_vol_shock_model.py
     └── test_schemas.py
 ```
 
@@ -110,6 +148,8 @@ The API will be available at `http://localhost:8000`. The web UI dashboard will 
 | GET | `/api/spot-rates` | Get current spot rates |
 | GET | `/api/vol-surface` | Get vol surface summary |
 | GET | `/api/risk-summary` | Dashboard risk summary |
+| GET | `/api/news` | Get recent news headlines |
+| GET | `/api/news-impact` | **Get news with calculated impact on Greeks** |
 | POST | `/api/trades` | Create new trade |
 | DELETE | `/api/trades/{id}` | Delete trade |
 | WS | `/ws/greeks` | Real-time Greeks WebSocket |
@@ -134,6 +174,29 @@ pytest tests/test_nn_risk_engine.py -v
 ```
 
 ## Usage
+
+### Example: News Impact Analysis via API
+
+```bash
+# Get news with impact on Greeks
+curl "http://localhost:8000/api/news-impact?max_results=5"
+
+# Response includes:
+# - headline, source, url, published_at
+# - event_type, sentiment, sentiment_score, importance
+# - greeks_impact: {delta, gamma, vega, theta, rho}
+# - vol_shocks: {1W_ATM, 1M_ATM, 3M_ATM, 6M_ATM, 1Y_ATM}
+```
+
+### Example: Get Recent News
+
+```bash
+# Get all recent headlines
+curl "http://localhost:8000/api/news"
+
+# Filter by keyword
+curl "http://localhost:8000/api/news?keyword=fed"
+```
 
 ### Example: Compute Portfolio Risk via API
 
@@ -187,7 +250,7 @@ print(f"Total Vega: {greeks.total_greeks.vega}")
 print(f"Total Gamma: {greeks.total_greeks.gamma}")
 ```
 
-### Example: News Ingestion
+### Example: News Ingestion (Python)
 
 ```python
 import asyncio
@@ -200,6 +263,90 @@ async def main():
         print(f"{h.source}: {h.headline}")
 
 asyncio.run(main())
+```
+
+### Example: NLP Processing (Python)
+
+```python
+from nlp_engine import NLPEngine
+from schemas import NewsEvent
+from datetime import datetime
+
+# Initialize engine (uses FinBERT if available, else rule-based fallback)
+engine = NLPEngine()
+
+# Process a news event
+event = NewsEvent(
+    headline="Fed signals potential rate cuts amid cooling inflation",
+    source="Reuters",
+    url="https://reuters.com",
+    published_at=datetime.now(),
+    content="Federal Reserve officials indicate openness to rate reductions."
+)
+
+event_vector = engine.process_news_event(event)
+
+print(f"Event Type: {event_vector.event_type.value}")
+print(f"Sentiment: {event_vector.sentiment.value} ({event_vector.sentiment_score})")
+print(f"Importance: {event_vector.importance}")
+print(f"Entities: {event_vector.entities}")
+```
+
+### Example: News-to-Risk Pipeline (Python)
+
+```python
+import asyncio
+from news_ingestion import NewsIngestionService
+from nlp_engine import NLPEngine
+from vol_shock_model import VolShockModel
+from vol_surface_service import VolSurfaceService, create_mock_surface
+from nn_risk_engine import NNRiskEngine
+from schemas import Portfolio
+from datetime import datetime
+
+async def assess_news_impact():
+    # Initialize services
+    news_service = NewsIngestionService()
+    nlp_engine = NLPEngine()
+    vol_shock_model = VolShockModel()
+    vol_surface_service = VolSurfaceService()
+    risk_engine = NNRiskEngine()
+    
+    # Fetch news
+    headlines = await news_service.fetch_all_headlines()
+    
+    # Get baseline Greeks
+    portfolio = Portfolio(...)
+    baseline_surface = create_mock_surface(datetime.now())
+    baseline_greeks = risk_engine.compute_portfolio_greeks(
+        portfolio, baseline_surface, {"EURUSD": 1.0850}
+    )
+    
+    # Process each headline and calculate impact
+    for headline in headlines[:5]:
+        # NLP processing
+        event_vector = nlp_engine.process_news_event(headline)
+        
+        # Predict vol shock
+        vol_shock = vol_shock_model.predict_shock(event_vector)
+        
+        # Apply shock
+        shocked_surface, _ = vol_surface_service.get_shocked_surface(
+            baseline_surface, vol_shock
+        )
+        
+        # Compute impacted Greeks
+        shocked_greeks = risk_engine.compute_portfolio_greeks(
+            portfolio, shocked_surface, {"EURUSD": 1.0850}
+        )
+        
+        # Calculate delta
+        delta_vega = shocked_greeks.total_greeks.vega - baseline_greeks.total_greeks.vega
+        
+        print(f"{headline.headline[:50]}...")
+        print(f"  → ΔVega: {delta_vega:.2f}")
+
+asyncio.run(assess_news_impact())
 ```
 
 ### Example: Vol Surface Service
@@ -247,12 +394,12 @@ print(f"Tenors: {surface.tenors}")
 
 The system consists of 6 main modules:
 
-1. **News Ingestion** (`news_ingestion.py`) - Real-time headline aggregation
-2. **NLP Processing** - Event vector extraction (requires FinBERT model)
-3. **Vol Shock Model** - Predicts vol surface changes from events
-4. **Vol Surface Service** (`vol_surface_service.py`) - Surface management and caching
-5. **NN Risk Engine** (`nn_risk_engine.py`) - Greeks computation
-6. **API Server** (`api.py`) - FastAPI REST API with WebSocket support
+1. **News Ingestion** (`news_ingestion.py`) - Real-time headline aggregation from NewsAPI, RSS feeds
+2. **NLP Processing** (`nlp_engine.py`) - Event vector extraction using FinBERT sentiment analysis
+3. **Vol Shock Model** (`vol_shock_model.py`) - Predicts vol surface changes from events
+4. **Vol Surface Service** (`vol_surface_service.py`) - Surface management, caching, and shock application
+5. **NN Risk Engine** (`nn_risk_engine.py`) - Greeks computation (ONNX/PyTorch/Black-Scholes)
+6. **Alert System** (planned) - Risk limit monitoring and alerts
 
 ### Risk Engine Modes
 
@@ -261,6 +408,37 @@ The risk engine supports multiple computation modes:
 - **onnx** - Neural network inference (requires `models/risk_nn.onnx`)
 - **pytorch** - PyTorch model (not yet implemented)
 - **auto** - Try ONNX → PyTorch → Black-Scholes fallback chain
+
+### News Impact Flow
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                       NEWS IMPACT FLOW                                  │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  News Sources ──▶ News Ingestion ──▶ NLP Engine ──▶ Vol Shock Model    │
+│                                                                         │
+│                        │                          │                    │
+│                        ▼                          ▼                    │
+│                   NewsEvent ─────────────▶ EventVector                 │
+│                                              │                         │
+│                                              ▼                         │
+│                                       VolShock ──────────────────┐     │
+│                                              │                    │     │
+│                                              ▼                    ▼     │
+│                                    Vol Surface ──────▶ Shocked Surface  │
+│                                                              │          │
+│                                                              ▼          │
+│                                                       Risk Engine       │
+│                                                              │          │
+│                                                              ▼          │
+│                                                       Greeks Impact     │
+│                                                              │          │
+│                                                              ▼          │
+│                                                         Dashboard       │
+│                                                                         │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Development
 
@@ -322,8 +500,44 @@ The system exposes Prometheus metrics via the `prometheus.yml` configuration. Me
    - Greeks computation will still work with analytical formulas
 
 3. **NewsAPI Key Missing**
-   - News ingestion will be disabled
-   - Set `NEWSAPI_KEY` in `.env` to enable
+   - News ingestion will use mock headlines for demo
+   - Set `NEWSAPI_KEY` in `.env` to enable real news
+
+4. **NLP Model Loading Failed**
+   - System uses rule-based fallback for sentiment analysis
+   - FinBERT model will load automatically when available
+
+5. **WebSocket Connection Issues**
+   - Ensure `DEBUG=false` in production
+   - Check CORS settings if connecting from different origin
+
+## Wireframes
+
+The system includes detailed wireframes in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
+
+1. **News Impact Dashboard Flow** - Complete pipeline from news to Greeks impact
+2. **Web UI Dashboard Layout** - Real-time risk dashboard with news panel
+3. **News Impact Analysis Sequence** - API sequence diagram for news impact
+
+## Use Cases
+
+### UC-1: Real-time News Risk Assessment
+Risk Manager monitors portfolio as news flows in. System automatically processes news through NLP → Vol Shock → Greeks pipeline and updates dashboard.
+
+### UC-2: Portfolio Stress Testing via News
+Replays historical news events to calculate portfolio impact under stress scenarios.
+
+### UC-3: News-Driven Vol Surface Versioning
+Each news event creates a new vol surface version linked to the triggering event for audit trail.
+
+### UC-4: Time-Ladder Analysis with News Filter
+Trader filters time ladder to show only positions affected by specific event types (e.g., interest rate news).
+
+### UC-5: WebSocket Real-time Greeks Ticking
+Trader receives live Greeks updates every second via WebSocket connection.
+
+### UC-6: Trade Entry with Auto-Risk Assessment
+Dealer enters new trade and immediately sees Greeks impact before confirmation.
 
 ## License
 

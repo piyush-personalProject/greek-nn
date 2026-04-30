@@ -79,11 +79,14 @@
                 </div>
             </aside>
 
-            <!-- Center Panel: Time Ladder -->
+            <!-- Center Panel: Time Ladder / News Impact -->
             <main class="panel panel-center">
                 <div class="panel-header">
-                    <h2>Time Ladder</h2>
-                    <div class="greek-selector">
+                    <div class="tab-selector">
+                        <button class="tab-btn active" data-tab="ladder">Time Ladder</button>
+                        <button class="tab-btn" data-tab="news">News Impact</button>
+                    </div>
+                    <div class="greek-selector" id="ladderGreekSelector">
                         <label>Greek:</label>
                         <select id="ladderGreekSelect">
                             <option value="vega" selected>Vega</option>
@@ -95,28 +98,61 @@
                     </div>
                 </div>
                 
-                <!-- Time Ladder Chart -->
-                <div class="chart-container">
-                    <canvas id="ladderChart"></canvas>
+                <!-- Time Ladder View -->
+                <div class="tab-content active" id="tab-ladder">
+                    <!-- Time Ladder Chart -->
+                    <div class="chart-container">
+                        <canvas id="ladderChart"></canvas>
+                    </div>
+
+                    <!-- Time Ladder Table -->
+                    <div class="ladder-table-container">
+                        <table class="ladder-table">
+                            <thead>
+                                <tr>
+                                    <th>Tenor</th>
+                                    <th>Delta</th>
+                                    <th>Gamma</th>
+                                    <th>Vega</th>
+                                    <th>Theta</th>
+                                    <th>Rho</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ladderTableBody">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
-                <!-- Time Ladder Table -->
-                <div class="ladder-table-container">
-                    <table class="ladder-table">
-                        <thead>
-                            <tr>
-                                <th>Tenor</th>
-                                <th>Delta</th>
-                                <th>Gamma</th>
-                                <th>Vega</th>
-                                <th>Theta</th>
-                                <th>Rho</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ladderTableBody">
-                            <!-- Populated by JS -->
-                        </tbody>
-                    </table>
+                <!-- News Impact View -->
+                <div class="tab-content" id="tab-news">
+                    <div class="impact-dashboard">
+                        <div class="impact-gauges">
+                            <div class="gauge-container">
+                                <canvas id="vegaGauge" width="80" height="60"></canvas>
+                                <span class="gauge-label">Vega</span>
+                            </div>
+                            <div class="gauge-container">
+                                <canvas id="deltaGauge" width="80" height="60"></canvas>
+                                <span class="gauge-label">Delta</span>
+                            </div>
+                            <div class="gauge-container">
+                                <canvas id="gammaGauge" width="80" height="60"></canvas>
+                                <span class="gauge-label">Gamma</span>
+                            </div>
+                        </div>
+                        <div class="impact-chart-container">
+                            <canvas id="impactChart"></canvas>
+                        </div>
+                        <div class="baseline-info">
+                            <span class="baseline-label">Baseline Vega:</span>
+                            <span class="baseline-value" id="baselineVega">--</span>
+                        </div>
+                    </div>
+                    <div class="news-impact-list" id="newsImpactList">
+                        <!-- Populated by JS with impact data -->
+                    </div>
                 </div>
             </main>
 
@@ -132,27 +168,6 @@
                     <!-- Populated by JS -->
                 </div>
             </aside>
-        </div>
-
-        <!-- Bottom Panel: News Feed -->
-        <div class="news-panel" id="newsPanel">
-            <div class="panel-header">
-                <h2>Market News & Impact</h2>
-                <div class="news-filter">
-                    <input type="text" id="newsSearchInput" placeholder="Filter news...">
-                </div>
-                <button class="btn btn-small" id="showImpactBtn">Show Impact</button>
-            </div>
-            <div class="news-impact-summary" id="newsImpactSummary" style="display: none;">
-                <span class="baseline-label">Baseline Vega:</span>
-                <span class="baseline-value" id="baselineVega">--</span>
-            </div>
-            <div class="news-list" id="newsList">
-                <!-- Populated by JS -->
-            </div>
-            <div class="news-impact-list" id="newsImpactList" style="display: none;">
-                <!-- Populated by JS with impact data -->
-            </div>
         </div>
 
         <!-- Maker/Dealer Trade Entry Modal -->

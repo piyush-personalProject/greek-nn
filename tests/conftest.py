@@ -202,3 +202,33 @@ def mock_redis():
             return True
     
     return MockRedis()
+
+
+@pytest.fixture
+def mock_vol_surface_list() -> VolSurface:
+    """
+    Creates a mock volatility surface with Python List[List[float]] volatilities.
+    This mimics what the actual API creates, which uses lists not numpy arrays.
+    The bug was that `*= (1.0 + float)` doesn't work on Python lists.
+    """
+    tenors = [0.0192, 0.0833, 0.25, 0.5, 1.0]  # 1W, 1M, 3M, 6M, 1Y
+    strikes = [100, 102.5, 97.5, 105, 95]  # ATM, 25RR+, 25RR-, 25BF+, 25BF-
+    
+    # Use Python list, not numpy array - this is the key difference
+    volatilities = [
+        [0.16, 0.17, 0.15, 0.18, 0.14],  # 1W
+        [0.15, 0.16, 0.14, 0.17, 0.13],  # 1M
+        [0.13, 0.14, 0.12, 0.15, 0.11],  # 3M
+        [0.12, 0.13, 0.11, 0.14, 0.10],  # 6M
+        [0.11, 0.12, 0.10, 0.13, 0.09],  # 1Y
+    ]
+    
+    return VolSurface(
+        snapshot_id="mock_surface_list_2024",
+        base_date=datetime.now(),
+        tenors=tenors,
+        strikes=strikes,
+        volatilities=volatilities,  # List[List[float]], not np.array
+        source="mock_list",
+        version="test_v1.0"
+    )

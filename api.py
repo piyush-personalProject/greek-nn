@@ -560,6 +560,8 @@ async def get_news_impact(max_results: int = 10):
     from logger import get_tracer
     
     with get_tracer().start_span("news_impact", max_results=max_results) as span:
+        global vol_shock_model
+        
         if news_service is None:
             raise HTTPException(status_code=503, detail="News service not available")
         
@@ -567,14 +569,14 @@ async def get_news_impact(max_results: int = 10):
             raise HTTPException(status_code=503, detail="NLP engine not available")
         
         if vol_shock_model is None:
-            raise HTTPException(status_code=503, detail="Vol shock model not available")
+            vol_shock_model = VolShockModel()
         
         if risk_engine is None:
             raise HTTPException(status_code=503, detail="Risk engine not available")
         
         try:
             # Get baseline Greeks (before any news)
-            portfolio = _portfolios.get(currentPortfolio)
+            portfolio = _portfolios.get("FX-PORTFOLIO-01")
             if not portfolio:
                 raise HTTPException(status_code=404, detail="Portfolio not found")
             

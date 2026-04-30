@@ -4,7 +4,7 @@
 
 The GreekNN Risk System is a portfolio risk management library that processes news events through NLP to generate volatility shocks, applies them to a vol surface, and computes neural network-based Greeks for risk assessment.
 
-**Current Status:** ✅ All core Python modules implemented (1-5). REST API server (FastAPI) fully operational with WebSocket support for real-time Greeks visualization.
+**Current Status:** All core Python modules implemented (1-5). REST API server (FastAPI) fully operational with WebSocket support for real-time Greeks visualization.
 
 ## Project Components
 
@@ -35,7 +35,7 @@ The GreekNN Risk System is a portfolio risk management library that processes ne
 │                                                               │                                     │
 │                                                               ▼                                     │
 │  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │                    MODULE 2: NLP PROCESSING (planned)                                        │ │
+│  │                    MODULE 2: NLP PROCESSING (nlp_engine.py)                                    │ │
 │  │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐    │ │
 │  │  │  NLPEngine (FinBERT-based sentiment and event extraction)                                 │    │ │
 │  │  │  ├── EventVector extraction (type, sentiment, importance, surprise)                    │    │ │
@@ -46,7 +46,7 @@ The GreekNN Risk System is a portfolio risk management library that processes ne
 │                                                               │                                     │
 │                                                               ▼                                     │
 │  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │                    MODULE 3: VOL SHOCK MODEL (planned)                                       │ │
+│  │                    MODULE 3: VOL SHOCK MODEL (vol_shock_model.py)                             │ │
 │  │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐    │ │
 │  │  │  VolShockModel (Neural network for vol impact prediction)                                │    │ │
 │  │  │  Input: EventVector (sentiment_score, importance, surprise_factor, event_type)          │    │ │
@@ -115,6 +115,8 @@ The GreekNN Risk System is a portfolio risk management library that processes ne
 │  │  │  ├── GET /api/spot-rates - Current spot rates                                          │    │ │
 │  │  │  ├── GET /api/vol-surface - Vol surface summary                                         │    │ │
 │  │  │  ├── GET /api/risk-summary - Dashboard risk summary                                     │    │ │
+│  │  │  ├── GET /api/news - News headlines                                                    │    │ │
+│  │  │  ├── GET /api/news-impact - News impact on Greeks                                     │    │ │
 │  │  │  ├── POST /api/trades - Create new trade                                               │    │ │
 │  │  │  └── DELETE /api/trades/{id} - Delete trade                                            │    │ │
 │  │  └─────────────────────────────────────────────────────────────────────────────────────────┘    │ │
@@ -138,27 +140,27 @@ The GreekNN Risk System is a portfolio risk management library that processes ne
 
 ```
 News Headline                    EventVector                    VolShock
-───────────                    ───────────                    ─────────
+──────────                    ───────────                    ─────────
     │                               │                               │
     ▼                               ▼                               ▼
 ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌───────────┐   ┌─────────┐
 │ Source  │──▶│  NLP Engine │──▶│ Vol Shock│──▶│ Vol Surface│──▶│Risk Eng │
 │ (Multi) │   │  (FinBERT)  │   │  Model   │   │  Service   │   │   (NN)  │
 └─────────┘   └─────────────┘   └─────────┘   └───────────┘   └─────────┘
-                                                                                    │
-                                                                                    ▼
-                                                                         ┌───────────┐
-                                                                         │   API     │
-                                                                         │  Server   │
-                                                                         └───────────┘
-                                                                              │
-                                                                              ▼
-                                                                    ┌───────────┐
-                                                                    │  Web UI   │
-                                                                    └───────────┘
+                                                                                     │
+                                                                                     ▼
+                                                                          ┌───────────┐
+                                                                          │   API     │
+                                                                          │  Server   │
+                                                                          └───────────┘
+                                                                               │
+                                                                               ▼
+                                                                     ┌───────────┐
+                                                                     │  Web UI   │
+                                                                     └───────────┘
 ```
 
-**Note:** Modules 2 (NLP Engine) and 3 (Vol Shock Model) are now fully implemented. Module 6 (Alert System) is planned.
+**All modules 1-5 are now fully implemented.**
 
 ## Component Responsibilities
 
@@ -210,7 +212,7 @@ News Headline                    EventVector                    VolShock
 - **Responsibility**: Compute portfolio Greeks using neural networks or Black-Scholes
 - **Input**: Portfolio positions, vol surface, spot rates
 - **Output**: Greeks (delta, gamma, vega, theta, rho) per position and total
-- **Modes**: 
+- **Modes**:
   - Black-Scholes (default, fully implemented)
   - ONNX (requires `models/risk_nn.onnx`)
   - PyTorch (planned)
@@ -233,6 +235,7 @@ News Headline                    EventVector                    VolShock
   - Real-time WebSocket updates
   - Vol surface and spot rates endpoints
   - Risk summary dashboard endpoint
+  - News ingestion and news impact analysis
 
 ## Technology Stack
 
@@ -251,6 +254,325 @@ News Headline                    EventVector                    VolShock
 | Logging | structlog | Structured JSON logging | ✅ |
 | Testing | pytest | Unit tests | ✅ |
 | Monitoring | Prometheus | Metrics | ✅ Available |
+
+## News-Based Wireframes
+
+### Wireframe 1: News Impact Dashboard Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    NEWS IMPACT ANALYSIS FLOW                                         │
+├─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                         │
+│   ┌───────────────────────────────────────┐     ┌───────────────────────────────────────┐            │
+│   │          NEWS INGESTION               │     │           NLP PROCESSING                │            │
+│   │  ┌─────────────────────────────────┐  │     │  ┌─────────────────────────────────┐  │            │
+│   │  │  "Fed signals potential rate   │  │     │  │  Event Type: INTEREST_RATE     │  │            │
+│   │  │   cuts amid cooling inflation"  │  │     │  │  Sentiment: NEGATIVE           │  │            │
+│   │  │                 │               │  │     │  │  Score: -0.73                  │  │            │
+│   │  │                 ▼               │  │     │  │  Importance: 0.82              │  │            │
+│   │  │  ┌──────────────────────────┐  │  │     │  │  Entities: [Fed, USD, Rates]  │  │            │
+│   │  │  │   Source: Reuters        │  │  │     │  └─────────────────────────────────┘  │            │
+│   │  │  │   URL: reuters.com/...   │  │  │     │                 │                    │            │
+│   │  │  │   Published: 2026-04-30 │  │  │     │                 ▼                    │            │
+│   │  │  └──────────────────────────┘  │  │     │  ┌─────────────────────────────────┐  │            │
+│   │  └─────────────────────────────────┘  │     │  │       VOL SHOCK MODEL           │  │            │
+│   └───────────────────────────────────────┘     │  │  ┌─────────────────────────────────┐  │            │
+│                                                    │  │  │  1W ATM: -0.0023               │  │            │
+│                                                    │  │  │  1M ATM: -0.0031               │  │            │
+│   ┌───────────────────────────────────────┐     │  │  │  3M ATM: -0.0028               │  │            │
+│   │         VOL SURFACE UPDATE             │     │  │  │  6M ATM: -0.0021               │  │            │
+│   │  ┌─────────────────────────────────┐  │     │  │  │  1Y ATM: -0.0015               │  │            │
+│   │  │  Vol_base ──▶ Vol_shocked      │  │     │  │  └─────────────────────────────────┘  │            │
+│   │  │                                 │  │     │  └─────────────────────────────────┘  │            │
+│   │  │  1W: 10.0%  ──▶  9.77%         │  │     └───────────────────────────────────────┘            │
+│   │  │  1M: 10.0%  ──▶  9.69%         │  │                    │                                   │
+│   │  │  3M: 10.0%  ──▶  9.72%         │  │                    ▼                                   │
+│   │  │  6M: 10.0%  ──▶  9.79%         │  │     ┌───────────────────────────────────────┐            │
+│   │  │  1Y: 10.0%  ──▶  9.85%         │  │     │         GREEKS COMPUTATION             │            │
+│   │  └─────────────────────────────────┘  │     │  ┌─────────────────────────────────┐  │            │
+│   └───────────────────────────────────────┘     │  │  Baseline    │  Shocked     │  Δ    │  │            │
+│                                                    │  ├──────────────┼───────────────┼──────┤  │            │
+│   ┌───────────────────────────────────────┐     │  │  Delta: 50K  │  Delta: 48K   │ -2K   │  │            │
+│   │            IMPACT SUMMARY              │     │  │  Gamma: 12K  │  Gamma: 11.5K │ -0.5K │  │            │
+│   │  ┌─────────────────────────────────┐  │     │  │  Vega: 100K   │  Vega: 97K    │ -3K   │  │            │
+│   │  │  Headline: Fed signals rate...  │  │     │  │  Theta: -5K  │  Theta: -4.8K │ +0.2K │  │            │
+│   │  │  Source: Reuters                │  │     │  │  Rho: 25K    │  Rho: 23K     │ -2K   │  │            │
+│   │  │  Event Type: INTEREST_RATE      │  │     │  └─────────────────────────────────┘  │            │
+│   │  │  Sentiment: NEGATIVE (-0.73)    │  │     └───────────────────────────────────────┘            │
+│   │  │  ─────────────────────────────   │  │                                                          │
+│   │  │  Greeks Impact:                  │  │                                                          │
+│   │  │    Δ Delta: -$2,000             │  │                                                          │
+│   │  │    Δ Vega: -$3,000              │  │                                                          │
+│   │  │    Δ Gamma: -$500               │  │                                                          │
+│   │  └─────────────────────────────────┘  │                                                          │
+│   └───────────────────────────────────────┘                                                          │
+│                                                                                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Wireframe 2: Web UI Dashboard Layout
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  GREEK NN RISK DASHBOARD                                    [Risk Summary] [News Impact] [Alerts]  │
+├─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                         │
+│ ┌─────────────────────────────┐ ┌─────────────────────────────┐ ┌─────────────────────────────────┐│
+│ │   TOTAL GREEKS              │ │   SPOT RATES                 │ │   VOL SURFACE                    ││
+│ │   ───────────────           │ │   ───────────               │ │   ──────────────                 ││
+│ │   Delta:    $45,230         │ │   EURUSD:  1.0850           │ │   1W  ████████░░  9.8%         ││
+│ │   Gamma:    $12,450         │ │   USDJPY:  149.50           │ │   1M  ███████░░░ 10.1%         ││
+│ │   Vega:     $98,520         │ │   GBPUSD:  1.2650           │ │   3M  ██████░░░░ 10.3%         ││
+│ │   Theta:    -$5,230         │ │   USDCHF:  0.8850           │ │   6M  █████░░░░░ 10.5%         ││
+│ │   Rho:      $25,340         │ │                             │ │   1Y  ████░░░░░░ 10.8%         ││
+│ └─────────────────────────────┘ └─────────────────────────────┘ └─────────────────────────────────┘│
+│                                                                                                         │
+│ ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐│
+│ │  TIME LADDER (VEGA)                                    [Delta] [Gamma] [Vega] [Theta] [Rho]       ││
+│ │  ─────────────────────────────────────────────────────────────────────────────────────────────────││
+│ │      1W        1M        3M        6M        1Y                                                        ││
+│ │  ████████  ████████████████  ████████████████  ██████████████  ████████                              ││
+│ │   $15,230    $45,230       $28,450        $12,340       $8,230                                      ││
+│ └─────────────────────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                                         │
+│ ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐│
+│ │  RECENT NEWS                                               [Filter: All ▼] [Show Impact ☑]        ││
+│ │  ─────────────────────────────────────────────────────────────────────────────────────────────────││
+│ │  ● Fed signals potential rate cuts amid cooling inflation data                        Reuters 2m ago ││
+│ │    Event: INTEREST_RATE | Sentiment: NEGATIVE (-0.73) | Impact: ΔVega -$3,000                       ││
+│ │  ─────────────────────────────────────────────────────────────────────────────────────────────────││
+│ │  ● ECB maintains cautious stance on monetary policy normalization                    Bloomberg 5m ago ││
+│ │    Event: CENTRAL_BANK | Sentiment: NEUTRAL (0.1) | Impact: ΔVega -$500                              ││
+│ │  ─────────────────────────────────────────────────────────────────────────────────────────────────││
+│ │  ● NFP report shows stronger than expected employment growth                            CNBC 15m ago   ││
+│ │    Event: EMPLOYMENT | Sentiment: POSITIVE (0.65) | Impact: ΔVega +$1,200                           ││
+│ └─────────────────────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                                         │
+│ ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐│
+│ │  PORTFOLIO POSITIONS                                              [+ Add Trade] [Export CSV]       ││
+│ │  ─────────────────────────────────────────────────────────────────────────────────────────────────││
+│ │  ID       Instrument  Type  Strike   Tenor   Quantity    Delta     Gamma     Vega                 ││
+│ │  TRADE-001 EURUSD     CALL  1.0900   1M     1,000,000    $12,340   $2,100    $8,500              ││
+│ │  TRADE-002 EURUSD     PUT   1.0800   3M      -500,000   -$8,200   -$1,400   -$5,200              ││
+│ │  TRADE-003 USDJPY     CALL  150.00   1W      2,000,000    $25,000   $3,200    $12,000             ││
+│ │  TRADE-004 GBPUSD     PUT   1.2600   6M       750,000    -$5,600   -$1,100   -$4,800              ││
+│ └─────────────────────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Wireframe 3: News Impact Analysis Sequence
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                           NEWS IMPACT ANALYSIS SEQUENCE                                             │
+├─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                         │
+│  Trader/UI              API                  NLP Engine          Vol Shock      Vol Surface   Risk Eng │
+│     │                   │                       │                    │               │            │     │
+│     │──GET /news-impact─▶                       │                    │               │            │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │──Fetch headlines──────▶                    │               │            │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │                       │──FinBERT analyze───▶│               │            │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │                       │◀──EventVector───────│               │            │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │                       │────Predict shock────▶│               │            │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │                       │◀──VolShock─────────│               │            │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │                       │                    │──Apply shock─▶│               │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │                       │                    │◀─Shocked──────│               │     │
+│     │                   │                       │                    │   surface     │            │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │                       │                    │               │──Compute───▶│     │
+│     │                   │                       │                    │               │   Greeks   │     │
+│     │                   │                       │                    │               │            │     │
+│     │                   │◀──Impact Report──────────────────────────────────────────────────────────│     │
+│     │◀──Dashboard Update│                       │                    │               │            │     │
+│     │                   │                       │                    │               │            │     │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Use Cases
+
+### UC-1: Real-time News Risk Assessment
+
+**Actor:** Risk Manager, Trader
+
+**Preconditions:**
+- News ingestion service is running
+- NLP engine is initialized (or fallback mode active)
+- Vol shock model is available
+
+**Flow:**
+1. System continuously ingests news from NewsAPI, RSS feeds
+2. News is processed through NLP engine to extract EventVector
+3. EventVector is fed to Vol Shock Model to predict surface impact
+4. Shocked vol surface is applied
+5. Greeks are recomputed and compared to baseline
+6. Significant impacts (|ΔGreeks| > threshold) trigger display update
+
+**Postconditions:**
+- Dashboard shows updated Greeks with news impact
+- Time ladder reflects current risk state
+
+**Example:**
+```
+Headline: "Fed signals potential rate cuts amid cooling inflation"
+→ EventType: INTEREST_RATE
+→ Sentiment: NEGATIVE (-0.73)
+→ Importance: 0.82
+→ Vol Shock: 1M ATM -0.0031
+→ Greeks Impact: ΔVega = -$3,000
+```
+
+### UC-2: Portfolio Stress Testing via News
+
+**Actor:** Risk Manager
+
+**Preconditions:**
+- Portfolio loaded in system
+- Historical news or scenario headlines available
+
+**Flow:**
+1. Risk manager selects historical news event(s)
+2. System replays event through NLP → Vol Shock → Greeks pipeline
+3. Shocked portfolio Greeks are computed
+4. Risk metrics (VaR equivalent) are calculated
+
+**Example:**
+```
+Historical Event: "2008 Lehman Brothers Collapse"
+→ EventType: MACRO
+→ Sentiment: NEGATIVE (-0.95)
+→ Vol Shock: 1M ATM +0.15 (extreme stress)
+→ Shocked Portfolio: Delta=$250K (vs baseline $45K)
+→ Risk Alert: "Delta exceeds limit by $200K"
+```
+
+### UC-3: News-Driven Vol Surface Versioning
+
+**Actor:** System (automated)
+
+**Preconditions:**
+- News event processed
+- Vol shock predicted
+
+**Flow:**
+1. New news event triggers vol shock
+2. New vol surface version created with shock applied
+3. Surface version linked to triggering event via EventVector.event_id
+4. Greeks recomputed with new surface
+5. All computations logged with surface version for audit
+
+**API Usage:**
+```
+GET /api/vol-surface
+Response:
+{
+  "snapshot_id": "vol-2026-04-30-001",
+  "base_date": "2026-04-30T00:00:00Z",
+  "version": "shocked-by-event-abc123",
+  "tenors": ["1W", "1M", "3M", "6M", "1Y"],
+  "vols_atm": [0.0977, 0.0969, 0.0972, 0.0979, 0.0985]
+}
+```
+
+### UC-4: Time-Ladder Analysis with News Filter
+
+**Actor:** Trader, Risk Manager
+
+**Preconditions:**
+- Portfolio has positions across multiple tenors
+
+**Flow:**
+1. User requests time ladder for specific Greek type (e.g., vega)
+2. User optionally filters by news event type (e.g., INTEREST_RATE only)
+3. System computes Greeks bucketed by tenor
+4. Only positions affected by filtered news are highlighted
+
+**API Usage:**
+```
+GET /api/portfolios/FX-PORTFOLIO-01/time-ladder?greek_type=vega
+
+Response:
+{
+  "portfolio_id": "FX-PORTFOLIO-01",
+  "greek_type": "vega",
+  "ladder": [
+    {"tenor": "1W", "greeks": {"vega": 15230, ...}},
+    {"tenor": "1M", "greeks": {"vega": 45230, ...}},
+    {"tenor": "3M", "greeks": {"vega": 28450, ...}},
+    {"tenor": "6M", "greeks": {"vega": 12340, ...}},
+    {"tenor": "1Y", "greeks": {"vega": 8230, ...}}
+  ],
+  "total": {"vega": 109480, ...}
+}
+```
+
+### UC-5: WebSocket Real-time Greeks Ticking
+
+**Actor:** Trader (frontend client)
+
+**Preconditions:**
+- WebSocket connection established to /ws/greeks
+
+**Flow:**
+1. Client connects to WebSocket endpoint
+2. Server sends current Greeks state every 1 second
+3. Client UI updates Greeks display in real-time
+4. Client receives broadcast events (trade_added, trade_removed)
+
+**WebSocket Messages:**
+```json
+// Periodic tick
+{"type": "tick", "timestamp": "2026-04-30T22:47:00Z", "total_greeks": {"delta": 45230, ...}}
+
+// Trade added notification
+{"type": "trade_added", "trade_id": "TRADE-006", "instrument": "EURUSD"}
+
+// Trade removed notification
+{"type": "trade_removed", "trade_id": "TRADE-003"}
+```
+
+### UC-6: Trade Entry with Auto-Risk Assessment
+
+**Actor:** Dealer, Trader
+
+**Preconditions:**
+- Portfolio exists
+- Vol surface is current
+
+**Flow:**
+1. Dealer enters new trade parameters (instrument, strike, tenor, quantity, type)
+2. System immediately computes Greeks impact of new trade
+3. If Greeks exceed limits, warning displayed before confirmation
+4. On confirmation, trade added to portfolio
+5. All connected WebSocket clients receive trade_added notification
+
+**API Usage:**
+```
+POST /api/trades
+{
+  "instrument": "EURUSD",
+  "strike": 1.0900,
+  "tenor": 0.0833,
+  "quantity": 500000,
+  "option_type": "CALL",
+  "portfolio_id": "FX-PORTFOLIO-01"
+}
+
+Response:
+{
+  "status": "success",
+  "trade_id": "TRADE-006",
+  "position": {...}
+}
+```
 
 ## Configuration Management
 
@@ -300,11 +622,12 @@ ENABLE_ALERTS=false
 
 1. **Fallback Chain**: ONNX → PyTorch → Black-Scholes
 2. **Cache Miss Handling**: Memory → Redis → Backend
-3. **Graceful Degradation**: 
+3. **Graceful Degradation**:
    - Redis unavailable → memory-only caching
    - QuantLib unavailable → numpy-based calculations
    - NLP unavailable → manual event input
    - ONNX/PyTorch unavailable → Black-Scholes analytical
+   - News API unavailable → mock headlines for demo
 
 ## File Structure
 
@@ -358,6 +681,8 @@ greek_nn/
 | GET | `/api/spot-rates` | Get current spot rates |
 | GET | `/api/vol-surface` | Get vol surface summary |
 | GET | `/api/risk-summary` | Get dashboard risk summary |
+| GET | `/api/news` | Get recent news headlines |
+| GET | `/api/news-impact` | Get news with calculated impact on Greeks |
 | POST | `/api/trades` | Create new trade |
 | DELETE | `/api/trades/{id}` | Delete trade |
 | WS | `/ws/greeks` | Real-time Greeks WebSocket |
@@ -373,7 +698,7 @@ NewsEvent → EventVector → VolShock → VolSurface (shocked) → PortfolioGre
                                                     Greeks Impact (Δdelta, Δgamma, etc.)
 ```
 
-**New API Endpoint:** `GET /api/news-impact`
+**API Endpoint:** `GET /api/news-impact`
 - Returns recent news with their calculated impact on Greeks
 - Shows baseline Greeks vs shocked Greeks
 - Displays vol shocks per tenor (1W, 1M, 3M, 6M, 1Y ATM)
@@ -389,3 +714,4 @@ NewsEvent → EventVector → VolShock → VolSurface (shocked) → PortfolioGre
 | 1.1.0 | 2026-04 | Updated to reflect actual implementation state including FastAPI server |
 | 2.0.0 | 2026-04 | Added WebSocket support, portfolio management, time ladder analysis |
 | 2.1.0 | 2026-04 | Implemented Module 2 (NLP Engine with FinBERT) and Module 3 (Vol Shock Model) |
+| 2.2.0 | 2026-04 | Added news-based wireframes, use cases, and UI layouts |

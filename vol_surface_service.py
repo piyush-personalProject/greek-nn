@@ -198,8 +198,8 @@ class VolSurfaceService:
         - delta_1M_25BF -> 1M 25-delta BF
         """
         
-        # Clone baseline
-        shocked_vol = base_surface.volatilities.copy()
+        # Clone baseline - convert to numpy array for math operations
+        shocked_vol = np.array(base_surface.volatilities)
         
         # Shock mapping: tenor_idx -> shock amount
         tenor_shocks = {
@@ -213,31 +213,31 @@ class VolSurfaceService:
         # Apply shocks (multiplicative: vol_new = vol_old * (1 + shock))
         for tenor_idx, shock_amount in tenor_shocks.items():
             if tenor_idx < len(shocked_vol):
-                shocked_vol[tenor_idx][:] *= (1.0 + shock_amount)
+                shocked_vol[tenor_idx][:] = shocked_vol[tenor_idx][:] * (1.0 + shock_amount)
         
         # Apply RR and BF shocks to 1M tenor (idx=1)
         if len(shocked_vol) > 1:
             # Assume strike indices: [ATM, +25RR, -25RR, +BF, -BF]
             # RR: right wing (call) - left wing (put)
             if len(shocked_vol[1]) > 2:
-                shocked_vol[1][1] *= (1.0 + shock.delta_1M_25RR)  # +25RR
-                shocked_vol[1][2] *= (1.0 + shock.delta_1M_25RR)  # -25RR
+                shocked_vol[1][1] = shocked_vol[1][1] * (1.0 + shock.delta_1M_25RR)  # +25RR
+                shocked_vol[1][2] = shocked_vol[1][2] * (1.0 + shock.delta_1M_25RR)  # -25RR
             
             # BF: (call + put) / 2 - ATM
             if len(shocked_vol[1]) > 4:
-                shocked_vol[1][3] *= (1.0 + shock.delta_1M_25BF)  # +BF
-                shocked_vol[1][4] *= (1.0 + shock.delta_1M_25BF)  # -BF
+                shocked_vol[1][3] = shocked_vol[1][3] * (1.0 + shock.delta_1M_25BF)  # +BF
+                shocked_vol[1][4] = shocked_vol[1][4] * (1.0 + shock.delta_1M_25BF)  # -BF
         
         # Clamp to reasonable ranges (avoid negative or extreme vols)
         shocked_vol = np.clip(shocked_vol, 0.001, 2.0)
         
-        # Create new surface
+        # Create new surface (convert numpy array back to list for VolSurface schema)
         shocked_surface = VolSurface(
             snapshot_id=f"{base_surface.snapshot_id}_shocked",
             base_date=base_surface.base_date,
             tenors=base_surface.tenors,
             strikes=base_surface.strikes,
-            volatilities=shocked_vol,
+            volatilities=shocked_vol.tolist(),
             source=base_surface.source,
             version=f"{base_surface.version}+shock_{shock.shock_id[:8]}"
         )

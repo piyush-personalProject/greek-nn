@@ -537,6 +537,87 @@ class VolShockModel:
         )
         
         self.logger.info(f"ONNX model exported to {path}")
+
+    def train_and_export(
+        self,
+        output_path: str = "./models/vol_shock.onnx",
+        num_samples: int = 1000,
+        epochs: int = 50
+    ) -> Dict[str, any]:
+        """
+        Train VolShockNN model using rule-based predictions as ground truth
+        and export to ONNX format.
+        
+        Args:
+            output_path: Path to save the ONNX model
+            num_samples: Number of training samples to generate
+            epochs: Number of training epochs
+            
+        Returns:
+            Training history
+        """
+        import os
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        
+        # Generate training data using rule-based model as ground truth
+        training_data = self._generate_training_data(num_samples)
+        
+        # Train the model
+        history = self.train(training_data, epochs=epochs)
+        
+        # Export to ONNX
+        pytorch_path = output_path.replace(".onnx", ".pt")
+        self.save_model(pytorch_path)
+        self.export_onnx(output_path)
+        
+        self.logger.info(f"VolShockNN model trained and exported to {output_path}")
+        
+        return history
+
+    def _generate_training_data(
+        self,
+        num_samples: int
+    ) -> List[Tuple[EventVector, List[float]]]:
+        """
+        Generate training data using rule-based model as ground truth.
+        
+        Args:
+            num_samples: Number of samples to generate
+            
+        Returns:
+            List of (EventVector, [7 deltas]) training examples
+        """
+        import random
+        
+        training_data = []
+        
+        for _ in range(num_samples):
+            # Random event properties
+            event_type = random.choice(list(EventType))
+            sentiment = random.choice(list(Sentiment))
+            sentiment_score = random.uniform(-1, 1)
+            importance = random.uniform(0.1, 1.0)
+            surprise_factor = random.uniform(0, 1)
+            
+            event_vector = EventVector(
+                event_id=f"train_{random.randint(0, 999999)}",
+                headline="training_sample",
+                event_type=event_type,
+                sentiment=sentiment,
+                sentiment_score=sentiment_score,
+                importance=importance,
+                surprise_factor=surprise_factor,
+                entities={"central_banks": [], "currencies": [], "indicators": []},
+                processed_at=datetime.now(),
+                source="training"
+            )
+            
+            # Use rule-based model as ground truth
+            deltas = self._predict_rulebased(event_vector)
+            
+            training_data.append((event_vector, deltas))
+        
+        return training_data
     
     def health_check(self) -> Dict[str, str]:
         """Health check for vol shock model."""
