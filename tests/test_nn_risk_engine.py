@@ -403,3 +403,178 @@ class TestNNRiskEngineEdgeCases:
         assert greeks_dict["rho"] == 25.0
         assert greeks_dict["vanna"] is None
         assert greeks_dict["volga"] is None
+
+
+class TestImpactedGreeks:
+    """Tests for impacted Greeks with weighting between spot rate and news shock."""
+    
+    def test_impacted_greeks_full_shock(
+        self, sample_portfolio, mock_vol_surface, spot_rates
+    ):
+        """Test impacted Greeks with full vol shock (vol_shock_weight=1)."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        from schemas import GreeksImpactWeights, VolShock, EventVector, EventType, Sentiment
+        from vol_surface_service import create_mock_surface
+        
+        # Create shocked surface
+        shocked_surface = create_mock_surface(datetime.now(), base_vol=0.15)
+        
+        weights = GreeksImpactWeights(
+            spot_rate_weight=0.0,
+            vol_shock_weight=1.0,
+            spot_shock_weight=0.0
+        )
+        
+        result = engine.compute_impacted_greeks(
+            portfolio=sample_portfolio,
+            base_vol_surface=mock_vol_surface,
+            shocked_vol_surface=shocked_surface,
+            base_spot_rates=spot_rates,
+            weights=weights,
+            risk_free_rate=0.05
+        )
+        
+        assert result.portfolio_id == sample_portfolio.portfolio_id
+        assert isinstance(result.total_greeks, Greeks)
+        # With full shock, should get Greeks from shocked surface
+        assert result.total_greeks.vega != 0
+    
+    def test_impacted_greeks_no_shock(
+        self, sample_portfolio, mock_vol_surface, spot_rates
+    ):
+        """Test impacted Greeks with no shock (spot_rate_weight=1)."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        from schemas import GreeksImpactWeights
+        from vol_surface_service import create_mock_surface
+        
+        shocked_surface = create_mock_surface(datetime.now(), base_vol=0.15)
+        
+        weights = GreeksImpactWeights(
+            spot_rate_weight=1.0,
+            vol_shock_weight=0.0,
+            spot_shock_weight=0.0
+        )
+        
+        result = engine.compute_impacted_greeks(
+            portfolio=sample_portfolio,
+            base_vol_surface=mock_vol_surface,
+            shocked_vol_surface=shocked_surface,
+            base_spot_rates=spot_rates,
+            weights=weights,
+            risk_free_rate=0.05
+        )
+        
+        # With no shock, should get base Greeks
+        base_result = engine.compute_portfolio_greeks(
+            sample_portfolio, mock_vol_surface, spot_rates, risk_free_rate=0.05
+        )
+        
+        assert abs(result.total_greeks.vega - base_result.total_greeks.vega) < 0.01
+    
+    def test_impacted_greeks_blended(
+        self, sample_portfolio, mock_vol_surface, spot_rates
+    ):
+        """Test impacted Greeks with blended weights (50/50)."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        from schemas import GreeksImpactWeights
+        from vol_surface_service import create_mock_surface
+        
+        shocked_surface = create_mock_surface(datetime.now(), base_vol=0.15)
+        
+        weights = GreeksImpactWeights(
+            spot_rate_weight=0.5,
+            vol_shock_weight=0.5,
+            spot_shock_weight=0.0
+        )
+        
+        result = engine.compute_impacted_greeks(
+            portfolio=sample_portfolio,
+            base_vol_surface=mock_vol_surface,
+            shocked_vol_surface=shocked_surface,
+            base_spot_rates=spot_rates,
+            weights=weights,
+            risk_free_rate=0.05
+        )
+        
+        # Get base and full shock Greeks for comparison
+        base_result = engine.compute_portfolio_greeks(
+            sample_portfolio, mock_vol_surface, spot_rates, risk_free_rate=0.05
+        )
+        shocked_result = engine.compute_portfolio_greeks(
+            sample_portfolio, shocked_surface, spot_rates, risk_free_rate=0.05
+        )
+        
+        expected_vega = (base_result.total_greeks.vega + shocked_result.total_greeks.vega) / 2
+        
+        # Blended should be between base and shocked
+        assert min(base_result.total_greeks.vega, shocked_result.total_greeks.vega) <= result.total_greeks.vega
+        assert result.total_greeks.vega <= max(base_result.total_greeks.vega, shocked_result.total_greeks.vega)
+    
+    def test_impacted_greeks_position_level(
+        self, sample_portfolio, mock_vol_surface, spot_rates
+    ):
+        """Test that impacted Greeks are computed at position level."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        from schemas import GreeksImpactWeights
+        from vol_surface_service import create_mock_surface
+        
+        shocked_surface = create_mock_surface(datetime.now(), base_vol=0.15)
+        
+        weights = GreeksImpactWeights(
+            spot_rate_weight=0.3,
+            vol_shock_weight=0.7,
+            spot_shock_weight=0.0
+        )
+        
+        result = engine.compute_impacted_greeks(
+            portfolio=sample_portfolio,
+            base_vol_surface=mock_vol_surface,
+            shocked_vol_surface=shocked_surface,
+            base_spot_rates=spot_rates,
+            weights=weights,
+            risk_free_rate=0.05
+        )
+        
+        # Should have position-level Greeks
+        assert len(result.position_greeks) == len(sample_portfolio.positions)
+        for pos_id, greeks in result.position_greeks.items():
+            assert isinstance(greeks, Greeks)
+    
+    def test_weights_to_blend_factors(self):
+        """Test GreeksImpactWeights to_blend_factors method."""
+        from schemas import GreeksImpactWeights
+        
+        weights = GreeksImpactWeights(
+            spot_rate_weight=0.3,
+            vol_shock_weight=0.7,
+            spot_shock_weight=0.0
+        )
+        
+        spot_factor, vol_shock_factor, spot_shock_factor = weights.to_blend_factors()
+        
+        assert spot_factor == 0.3
+        assert vol_shock_factor == 0.7
+        assert spot_shock_factor == 0.0
+    
+    def test_blend_optional_greeks(self):
+        """Test blending of optional Greeks (vanna, volga)."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        # Both None
+        result = engine._blend_optional(None, None, 0.5, 0.5)
+        assert result is None
+        
+        # One None
+        result = engine._blend_optional(10.0, None, 0.5, 0.5)
+        assert result == 5.0
+        
+        result = engine._blend_optional(None, 20.0, 0.5, 0.5)
+        assert result == 10.0
+        
+        # Both present
+        result = engine._blend_optional(10.0, 20.0, 0.5, 0.5)
+        assert result == 15.0

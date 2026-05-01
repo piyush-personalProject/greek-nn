@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
     <title>FX Greeks Risk Dashboard</title>
     <link rel="stylesheet" href="/static/css/greeks.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -16,6 +19,11 @@
                 <span class="subtitle">Front Office Trading Risk</span>
             </div>
             <div class="header-right">
+                <button class="mobile-nav-toggle" id="mobileNavToggle" aria-label="Toggle navigation">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
                 <div class="connection-status" id="wsStatus">
                     <span class="status-dot disconnected"></span>
                     <span class="status-text">Disconnected</span>
@@ -102,6 +110,15 @@
                 <div class="tab-content active" id="tab-ladder">
                     <!-- Time Ladder Chart -->
                     <div class="chart-container">
+                        <div class="chart-header">
+                            <span class="chart-title">Greek Exposure by Tenor</span>
+                            <div class="chart-legend">
+                                <div class="legend-item">
+                                    <span class="legend-dot" style="background-color: rgba(59, 130, 246, 0.6);"></span>
+                                    <span id="chartLegendText">Vega</span>
+                                </div>
+                            </div>
+                        </div>
                         <canvas id="ladderChart"></canvas>
                     </div>
 
@@ -127,27 +144,40 @@
 
                 <!-- News Impact View -->
                 <div class="tab-content" id="tab-news">
+                    <div class="impact-summary">
+                        <div class="summary-metric">
+                            <span class="metric-label">Baseline Vega</span>
+                            <span class="metric-value" id="baselineVega">--</span>
+                        </div>
+                        <div class="summary-metric">
+                            <span class="metric-label">Active News</span>
+                            <span class="metric-value" id="activeNewsCount">--</span>
+                        </div>
+                        <div class="summary-metric">
+                            <span class="metric-label">Total Impact</span>
+                            <span class="metric-value" id="totalImpact">--</span>
+                        </div>
+                    </div>
                     <div class="impact-dashboard">
                         <div class="impact-gauges">
-                            <div class="gauge-container">
-                                <canvas id="vegaGauge" width="80" height="60"></canvas>
+                            <div class="gauge-wrapper">
+                                <canvas id="vegaGauge" width="100" height="80"></canvas>
                                 <span class="gauge-label">Vega</span>
+                                <span class="gauge-value" id="vegaGaugeValue">0</span>
                             </div>
-                            <div class="gauge-container">
-                                <canvas id="deltaGauge" width="80" height="60"></canvas>
+                            <div class="gauge-wrapper">
+                                <canvas id="deltaGauge" width="100" height="80"></canvas>
                                 <span class="gauge-label">Delta</span>
+                                <span class="gauge-value" id="deltaGaugeValue">0</span>
                             </div>
-                            <div class="gauge-container">
-                                <canvas id="gammaGauge" width="80" height="60"></canvas>
+                            <div class="gauge-wrapper">
+                                <canvas id="gammaGauge" width="100" height="80"></canvas>
                                 <span class="gauge-label">Gamma</span>
+                                <span class="gauge-value" id="gammaGaugeValue">0</span>
                             </div>
                         </div>
-                        <div class="impact-chart-container">
+                        <div class="impact-chart-wrapper">
                             <canvas id="impactChart"></canvas>
-                        </div>
-                        <div class="baseline-info">
-                            <span class="baseline-label">Baseline Vega:</span>
-                            <span class="baseline-value" id="baselineVega">--</span>
                         </div>
                     </div>
                     <div class="news-impact-list" id="newsImpactList">

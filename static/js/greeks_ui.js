@@ -11,7 +11,7 @@ let currentGreeks = {
 };
 let currentHeadlines = [];
 let currentImpactData = null;
-let activeTab = 'ladder';
+let activeTab = 'news';
 let newsPollInterval = null;
 
 // Polling intervals (in milliseconds)
@@ -159,6 +159,30 @@ function initializeEventListeners() {
         });
     });
     
+    // Mobile navigation toggle
+    const mobileNavToggle = document.getElementById('mobileNavToggle');
+    if (mobileNavToggle) {
+        mobileNavToggle.addEventListener('click', () => {
+            mobileNavToggle.classList.toggle('active');
+            // Toggle panel visibility on mobile
+            document.querySelectorAll('.panel').forEach(panel => {
+                panel.classList.toggle('expanded');
+            });
+        });
+    }
+    
+    // Panel header click to expand/collapse on mobile
+    document.querySelectorAll('.panel-header').forEach(header => {
+        header.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                const panel = header.closest('.panel');
+                if (panel) {
+                    panel.classList.toggle('expanded');
+                }
+            }
+        });
+    });
+    
     // Initialize startAutoPolling after DOM is ready
     setTimeout(startAutoPolling, 1000);
 }
@@ -266,9 +290,14 @@ function switchTab(tab) {
         greekSelector.style.display = tab === 'ladder' ? 'flex' : 'none';
     }
     
-    // If switching to news tab, load impact if not already loaded
-    if (tab === 'news' && !currentImpactData) {
-        loadNewsImpact();
+    // If switching to news tab, ensure data is loaded
+    if (tab === 'news') {
+        if (!currentImpactData) {
+            loadNewsWithImpact();
+        } else {
+            // Data already loaded, just update the display
+            updateNewsImpactList(currentImpactData.news_impacts);
+        }
     }
     
     console.log('Switched to tab:', tab);
@@ -279,51 +308,52 @@ function switchTab(tab) {
 function startAutoPolling() {
     console.log('Starting auto polling...');
     
-    // Initial load of news and impact
-    loadNews();
-    loadNewsImpact();
+    // Single call fetches both news AND impact data together
+    loadNewsWithImpact();
     
-    // Set up polling intervals
+    // Set up polling interval (refresh both news and impact together)
     newsPollInterval = setInterval(() => {
-        console.log('Polling news...');
-        loadNews();
+        console.log('Polling news with impact...');
+        loadNewsWithImpact();
     }, NEWS_POLL_INTERVAL);
-    
-    // Impact refreshes less frequently
-    setInterval(() => {
-        console.log('Refreshing news impact...');
-        loadNewsImpact();
-    }, IMPACT_POLL_INTERVAL);
 }
 
-async function loadNews() {
+async function loadNewsWithImpact() {
     try {
-        console.log('Fetching news from /api/news...');
-        const response = await fetch('/api/news');
-        console.log('News response status:', response.status);
+        console.log('Fetching news with impact from /api/news-with-impact...');
+        const response = await fetch('/api/news-with-impact?max_results=10');
+        console.log('News with impact response status:', response.status);
         
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('News API error:', response.status, errorText);
+            console.error('News with impact API error:', response.status, errorText);
             return;
         }
         
         const data = await response.json();
-        console.log('News data received:', data.count, 'headlines');
+        console.log('News with impact data received:', data.count, 'headlines');
         
-        // Sort by published_at descending
-        const sortedHeadlines = (data.headlines || []).sort((a, b) => {
-            const dateA = new Date(a.published_at || 0);
-            const dateB = new Date(b.published_at || 0);
-            return dateB - dateA;
-        });
+        currentImpactData = data;
+        currentHeadlines = data.news_impacts || [];
         
-        currentHeadlines = sortedHeadlines;
-        console.log('Current headlines count:', currentHeadlines.length);
+        // Show baseline
+        document.getElementById('baselineVega').textContent = formatNumber(data.baseline_greeks.vega, 2);
+        
+        // Initialize gauges and chart
+        initializeGauges();
+        initializeImpactChart(data.news_impacts);
+        
+        updateNewsImpactList(data.news_impacts);
         
     } catch (error) {
-        console.error('Failed to load news:', error);
+        console.error('Failed to load news with impact:', error);
     }
+}
+
+async function loadNews() {
+    // Deprecated: Use loadNewsWithImpact() instead - it fetches news AND impact in single call
+    // Kept for backward compatibility but does nothing now
+    console.log('loadNews is deprecated - use loadNewsWithImpact');
 }
 
 function showNewsError(message) {
@@ -348,35 +378,9 @@ function filterNews(query) {
 }
 
 async function loadNewsImpact() {
-    const impactListContainer = document.getElementById('newsImpactList');
-    if (!impactListContainer) return;
-    
-    // Show loading state
-    impactListContainer.innerHTML = '<div class="news-loading">Loading news impact data...</div>';
-    
-    try {
-        const response = await fetch('/api/news-impact?max_results=10');
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Failed to load news impact (${response.status}): ${errorText}`);
-        }
-        
-        const data = await response.json();
-        currentImpactData = data;
-        
-        // Show baseline
-        document.getElementById('baselineVega').textContent = formatNumber(data.baseline_greeks.vega, 2);
-        
-        // Initialize gauges and chart
-        initializeGauges();
-        initializeImpactChart(data.news_impacts);
-        
-        updateNewsImpactList(data.news_impacts);
-        
-    } catch (error) {
-        console.error('Failed to load news impact:', error);
-        impactListContainer.innerHTML = `<div class="news-error">Failed to load news impact: ${error.message}</div>`;
-    }
+    // Deprecated: Use loadNewsWithImpact() instead - it fetches news AND impact in single call
+    console.log('loadNewsImpact is deprecated - use loadNewsWithImpact');
+    await loadNewsWithImpact();
 }
 
 function initializeGauges() {
@@ -409,34 +413,28 @@ function drawGauge(gaugeId, normalizedValue) {
     const canvas = gauge.canvas;
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    const radius = 25;
-    const lineWidth = 5;
+    const radius = 35;
+    const lineWidth = 8;
     
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw background arc
+    // Draw background arc (semicircle from left to right)
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, Math.PI, 0, false);
     ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = '#2d3a4f';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1a2332';
     ctx.stroke();
     
-    // Draw value arc (the arc starts from left (-Math.PI) to right (0))
-    // normalizedValue: 0 = full left, 1 = full right
-    const valueAngle = Math.PI + (Math.PI * normalizedValue);
+    // Draw value arc
+    const valueAngle = Math.PI + (Math.PI * Math.min(Math.max(normalizedValue, 0), 1));
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, Math.PI, valueAngle, false);
     ctx.lineWidth = lineWidth;
+    ctx.lineCap = 'round';
     ctx.strokeStyle = gauge.color;
     ctx.stroke();
-    
-    // Draw center value text
-    ctx.fillStyle = '#f0f4f8';
-    ctx.font = '10px Monaco';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(formatNumber(gauge.value, 0), centerX, centerY + 15);
 }
 
 function updateGauges(impacts) {
@@ -462,6 +460,15 @@ function updateGauges(impacts) {
     gaugeContexts['gammaGauge'].value = totalGamma;
     gaugeContexts['gammaGauge'].maxValue = Math.max(totalGamma * 1.5, 10000);
     drawGauge('gammaGauge', Math.min(totalGamma / gaugeContexts['gammaGauge'].maxValue, 1));
+    
+    // Update gauge value displays
+    const vegaValueEl = document.getElementById('vegaGaugeValue');
+    const deltaValueEl = document.getElementById('deltaGaugeValue');
+    const gammaValueEl = document.getElementById('gammaGaugeValue');
+    
+    if (vegaValueEl) vegaValueEl.textContent = formatNumber(totalVega, 0);
+    if (deltaValueEl) deltaValueEl.textContent = formatNumber(totalDelta, 0);
+    if (gammaValueEl) gammaValueEl.textContent = formatNumber(totalGamma, 0);
 }
 
 function initializeImpactChart(impacts) {
@@ -543,7 +550,27 @@ function updateNewsImpactList(impacts) {
     
     if (!impacts || impacts.length === 0) {
         container.innerHTML = '<div class="news-empty">No news impact data available</div>';
+        // Update summary metrics
+        const activeCountEl = document.getElementById('activeNewsCount');
+        const totalImpactEl = document.getElementById('totalImpact');
+        if (activeCountEl) activeCountEl.textContent = '0';
+        if (totalImpactEl) totalImpactEl.textContent = '--';
         return;
+    }
+    
+    // Update summary metrics
+    const activeCountEl = document.getElementById('activeNewsCount');
+    const totalImpactEl = document.getElementById('totalImpact');
+    if (activeCountEl) activeCountEl.textContent = impacts.length;
+    
+    // Calculate total impact (sum of absolute vega impacts)
+    let totalImpact = 0;
+    impacts.forEach(item => {
+        totalImpact += Math.abs(item.greeks_impact?.vega || 0);
+    });
+    if (totalImpactEl) {
+        totalImpactEl.textContent = formatNumber(totalImpact, 0);
+        totalImpactEl.className = 'metric-value ' + (totalImpact > 0 ? 'positive' : '');
     }
     
     // Update gauges with total impact
@@ -560,7 +587,7 @@ function updateNewsImpactList(impacts) {
     
     impacts.forEach(item => {
         const div = document.createElement('div');
-        div.className = 'news-item news-impact-item';
+        div.className = 'news-impact-item';
         
         const publishedDate = item.published_at ? new Date(item.published_at).toLocaleString() : '';
         const sentimentClass = item.sentiment === 'positive' ? 'positive' : (item.sentiment === 'negative' ? 'negative' : 'neutral');
@@ -608,7 +635,7 @@ function updateNewsImpactList(impacts) {
                     <span class="vol-shock-item">3M: ${item.vol_shocks['3M_ATM'] || 0}</span>
                 </div>
             </div>
-            ${item.url ? `<a href="${item.url}" target="_blank" class="news-link">Read more</a>` : ''}
+            ${item.url ? `<a href="${item.url}" target="_blank" class="news-link">Read more →</a>` : ''}
         `;
         
         container.appendChild(div);
@@ -771,9 +798,10 @@ function initializeChart() {
             datasets: [{
                 label: 'Vega',
                 data: [0, 0, 0, 0, 0],
-                backgroundColor: 'rgba(59, 130, 246, 0.6)',
-                borderColor: 'rgba(59, 130, 246, 1)',
-                borderWidth: 1
+                backgroundColor: 'rgba(34, 197, 94, 0.6)',
+                borderColor: 'rgba(34, 197, 94, 1)',
+                borderWidth: 1,
+                borderRadius: 4
             }]
         },
         options: {
@@ -784,14 +812,17 @@ function initializeChart() {
                     display: false
                 },
                 tooltip: {
-                    backgroundColor: 'rgba(26, 35, 50, 0.9)',
+                    backgroundColor: 'rgba(26, 35, 50, 0.95)',
                     titleColor: '#f0f4f8',
                     bodyColor: '#94a3b8',
                     borderColor: '#2d3a4f',
                     borderWidth: 1,
+                    cornerRadius: 6,
+                    padding: 10,
                     callbacks: {
                         label: (context) => {
-                            return `Vega: ${formatNumber(context.raw, 2)}`;
+                            const greekType = document.getElementById('ladderGreekSelect')?.value || 'vega';
+                            return `${greekType.charAt(0).toUpperCase() + greekType.slice(1)}: ${formatNumber(context.raw, 2)}`;
                         }
                     }
                 }
@@ -799,20 +830,22 @@ function initializeChart() {
             scales: {
                 x: {
                     grid: {
-                        color: 'rgba(45, 58, 79, 0.5)',
-                        drawBorder: false
-                    },
-                    ticks: {
-                        color: '#94a3b8'
-                    }
-                },
-                y: {
-                    grid: {
-                        color: 'rgba(45, 58, 79, 0.5)',
+                        color: 'rgba(45, 58, 79, 0.3)',
                         drawBorder: false
                     },
                     ticks: {
                         color: '#94a3b8',
+                        font: { size: 11 }
+                    }
+                },
+                y: {
+                    grid: {
+                        color: 'rgba(45, 58, 79, 0.3)',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#94a3b8',
+                        font: { size: 11 },
                         callback: (value) => formatNumber(value, 0)
                     }
                 }
@@ -829,6 +862,25 @@ function updateLadderChart(ladderData, greekType) {
     ladderChart.data.datasets[0].data = data;
     ladderChart.data.datasets[0].label = greekType.charAt(0).toUpperCase() + greekType.slice(1);
     ladderChart.options.scales.y.ticks.callback = (value) => formatNumber(value, 2);
+    
+    // Update chart legend text
+    const legendText = document.getElementById('chartLegendText');
+    if (legendText) {
+        legendText.textContent = greekType.charAt(0).toUpperCase() + greekType.slice(1);
+    }
+    
+    // Update legend dot color
+    const legendDot = document.querySelector('.legend-dot');
+    if (legendDot) {
+        const colorMap = {
+            delta: 'rgba(59, 130, 246, 0.6)',
+            gamma: 'rgba(168, 85, 247, 0.6)',
+            vega: 'rgba(34, 197, 94, 0.6)',
+            theta: 'rgba(234, 179, 8, 0.6)',
+            rho: 'rgba(239, 68, 68, 0.6)'
+        };
+        legendDot.style.backgroundColor = colorMap[greekType] || colorMap.vega;
+    }
     
     // Update colors based on Greek type
     const colors = {
@@ -852,13 +904,22 @@ function updateLadderTable(ladderData) {
     
     ladderData.forEach(entry => {
         const tr = document.createElement('tr');
+        
+        const deltaVal = entry.greeks.delta || 0;
+        const gammaVal = entry.greeks.gamma || 0;
+        const vegaVal = entry.greeks.vega || 0;
+        const thetaVal = entry.greeks.theta || 0;
+        const rhoVal = entry.greeks.rho || 0;
+        
+        const getValueClass = (val) => val > 0 ? 'positive-value' : (val < 0 ? 'negative-value' : '');
+        
         tr.innerHTML = `
             <td class="tenor-cell">${entry.tenor}</td>
-            <td>${formatNumber(entry.greeks.delta || 0, 2)}</td>
-            <td>${formatNumber(entry.greeks.gamma || 0, 4)}</td>
-            <td>${formatNumber(entry.greeks.vega || 0, 2)}</td>
-            <td>${formatNumber(entry.greeks.theta || 0, 2)}</td>
-            <td>${formatNumber(entry.greeks.rho || 0, 2)}</td>
+            <td class="${getValueClass(deltaVal)}">${formatNumber(deltaVal, 2)}</td>
+            <td class="${getValueClass(gammaVal)}">${formatNumber(gammaVal, 4)}</td>
+            <td class="${getValueClass(vegaVal)}">${formatNumber(vegaVal, 2)}</td>
+            <td class="${getValueClass(thetaVal)}">${formatNumber(thetaVal, 2)}</td>
+            <td class="${getValueClass(rhoVal)}">${formatNumber(rhoVal, 2)}</td>
         `;
         tbody.appendChild(tr);
     });

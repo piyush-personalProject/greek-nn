@@ -221,3 +221,57 @@ class TradeCreate(BaseModel):
     quantity: float
     option_type: str
     portfolio_id: str = "FX-PORTFOLIO-01"
+
+
+class GreeksImpactWeights(BaseModel):
+    """
+    Weighting parameters for calculating impacted Greeks.
+    
+    Allows blending between:
+    - Base state (spot_rate_weight=1, vol_shock_weight=0)
+    - Full shock state (spot_rate_weight=0, vol_shock_weight=1)  
+    - Blended state (any combination that sums to 1)
+    
+    Example:
+        spot_rate_weight=0.7, vol_shock_weight=0.3 means:
+        70% weight to live spot rate, 30% weight to shocked vol surface
+    """
+    spot_rate_weight: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Weight for live spot rate (0=no weight, 1=full weight)"
+    )
+    vol_shock_weight: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="Weight for vol shock impact (0=no weight, 1=full weight)"
+    )
+    spot_shock_weight: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Weight for spot shock impact (0=no weight, 1=full weight)"
+    )
+    
+    @validator("vol_shock_weight")
+    def validate_weights(cls, v, values):
+        """Ensure weights are non-negative."""
+        return max(0.0, min(1.0, v))
+    
+    def to_blend_factors(self) -> Tuple[float, float, float]:
+        """
+        Get normalized blend factors for Greeks calculation.
+        
+        Returns:
+            Tuple of (spot_factor, vol_shock_factor, spot_shock_factor)
+            These factors are used to blend: base_greeks * spot_factor + shocked_greeks * vol_shock_factor + spot_shocked_greeks * spot_shock_factor
+        """
+        # Normalize so they represent proportions
+        total = self.spot_rate_weight + self.vol_shock_weight + self.spot_shock_weight
+        if total == 0:
+            return (0.0, 0.0, 0.0)
+        
+        # For now, treat spot_rate_weight as inverse of vol_shock_weight
+        # i.e. if spot_rate_weight=0.7 and vol_shock_weight=0.3, we blend 30% shocked vol
+        # But the spot_rate_weight is more about which spot to use (live vs shocked)
+        spot_factor = self.spot_rate_weight
+        vol_shock_factor = self.vol_shock_weight
+        spot_shock_factor = self.spot_shock_weight
+        
+        return (spot_factor, vol_shock_factor, spot_shock_factor)

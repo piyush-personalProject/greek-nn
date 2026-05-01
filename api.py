@@ -20,7 +20,7 @@ from config import config
 from schemas import (
     Portfolio, PortfolioPosition, Greeks, PortfolioGreeks, VolSurface,
     ComputeRiskRequest, ComputeRiskResponse, RiskAlert, TradeCreate,
-    NewsEvent, EventVector
+    NewsEvent, EventVector, GreeksImpactWeights
 )
 from nn_risk_engine import NNRiskEngine, BlackScholesGreeksCPU
 from vol_surface_service import VolSurfaceService, create_mock_surface
@@ -352,6 +352,131 @@ async def compute_portfolio_greeks(
             raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/portfolios/{portfolio_id}/greeks/impacted")
+async def compute_impacted_greeks(
+    portfolio_id: str,
+    vol_shock_id: str,
+    weights: Optional[GreeksImpactWeights] = None,
+    shocked_spot_rates: Optional[Dict[str, float]] = None
+):
+    """
+    Compute Greeks with weighting between live spot rate and news shock impact.
+    
+    This endpoint blends between:
+    - Base state using live spot rate (spot_rate_weight=1, vol_shock_weight=0)
+    - Full shock state using shocked vol surface (spot_rate_weight=0, vol_shock_weight=1)
+    - Any blended state with custom weights
+    
+    Args:
+        portfolio_id: Portfolio to compute Greeks for
+        vol_shock_id: ID of the vol shock to apply (from news impact)
+        weights: Blending weights (default: vol_shock_weight=1.0 for full shock)
+        shocked_spot_rates: Optional shocked spot rates for spot shock impact
+    """
+    from logger import get_tracer
+    
+    with get_tracer().start_span("compute_impacted_greeks", portfolio_id=portfolio_id) as span:
+        if portfolio_id not in _portfolios:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        
+        if vol_surface_service is None:
+            raise HTTPException(status_code=503, detail="Vol surface service not available")
+        
+        if vol_shock_model is None:
+            vol_shock_model = VolShockModel()
+        
+        portfolio = _portfolios[portfolio_id]
+        base_vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        # Default weights
+        if weights is None:
+            weights = GreeksImpactWeights(
+                spot_rate_weight=0.0,
+                vol_shock_weight=1.0,
+                spot_shock_weight=0.0
+            )
+        
+        span.log(f"Computing impacted greeks with weights: spot={weights.spot_rate_weight}, vol_shock={weights.vol_shock_weight}")
+        
+        try:
+            # We need to find the vol shock by ID - for now, create a mock or use most recent
+            # In production, this would come from a stored vol shock
+            # For demo, we'll create a dummy vol shock based on the ID hash
+            event_vector = EventVector(
+                event_id=vol_shock_id,
+                headline=f"Shock event {vol_shock_id}",
+                event_type="MACRO",
+                sentiment="NEUTRAL",
+                sentiment_score=0.0,
+                importance=0.5,
+                surprise_factor=0.3,
+                entities={"central_banks": [], "currencies": [], "indicators": []},
+                processed_at=datetime.now(),
+                source="api"
+            )
+            vol_shock = vol_shock_model.predict_shock(event_vector)
+            
+            # Get shocked surface
+            shocked_vol_surface, shocked_version = vol_surface_service.get_shocked_surface(
+                base_vol_surface, vol_shock
+            )
+            
+            # Compute impacted (blended) Greeks
+            impacted_greeks = risk_engine.compute_impacted_greeks(
+                portfolio=portfolio,
+                base_vol_surface=base_vol_surface,
+                shocked_vol_surface=shocked_vol_surface,
+                base_spot_rates=_current_spot_rates,
+                shocked_spot_rates=shocked_spot_rates,
+                weights=weights,
+                risk_free_rate=0.05
+            )
+            
+            # Also get baseline for comparison
+            baseline_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=base_vol_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            # Calculate the delta (impact)
+            delta_delta = impacted_greeks.total_greeks.delta - baseline_greeks.total_greeks.delta
+            delta_gamma = impacted_greeks.total_greeks.gamma - baseline_greeks.total_greeks.gamma
+            delta_vega = impacted_greeks.total_greeks.vega - baseline_greeks.total_greeks.vega
+            delta_theta = impacted_greeks.total_greeks.theta - baseline_greeks.total_greeks.theta
+            delta_rho = impacted_greeks.total_greeks.rho - baseline_greeks.total_greeks.rho
+            
+            return {
+                "portfolio_id": impacted_greeks.portfolio_id,
+                "timestamp": impacted_greeks.timestamp.isoformat(),
+                "weights": {
+                    "spot_rate_weight": weights.spot_rate_weight,
+                    "vol_shock_weight": weights.vol_shock_weight,
+                    "spot_shock_weight": weights.spot_shock_weight
+                },
+                "base_vol_surface_version": base_vol_surface.version,
+                "shocked_vol_surface_version": shocked_version,
+                "baseline_greeks": baseline_greeks.total_greeks.to_dict(),
+                "impacted_greeks": impacted_greeks.total_greeks.to_dict(),
+                "greeks_delta": {
+                    "delta": round(delta_delta, 2),
+                    "gamma": round(delta_gamma, 4),
+                    "vega": round(delta_vega, 2),
+                    "theta": round(delta_theta, 2),
+                    "rho": round(delta_rho, 2)
+                },
+                "position_greeks": {
+                    pos_id: g.to_dict() 
+                    for pos_id, g in impacted_greeks.position_greeks.items()
+                }
+            }
+        except Exception as e:
+            span.log(f"Failed to compute impacted Greeks: {e}", level=40)
+            logger.error(f"Failed to compute impacted Greeks: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/portfolios/{portfolio_id}/time-ladder")
 async def get_time_ladder(
     portfolio_id: str,
@@ -548,6 +673,114 @@ async def get_news(keyword: Optional[str] = None, max_results: int = 20):
         except Exception as e:
             span.log(f"Failed to fetch news: {e}", level=40)
             logger.error(f"Failed to fetch news: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/news-with-impact")
+async def get_news_with_impact(max_results: int = 10):
+    """
+    Get news headlines WITH their Greeks impact - single call to avoid duplicate fetching.
+    Combines /api/news and /api/news-impact functionality.
+    """
+    from logger import get_tracer
+    
+    with get_tracer().start_span("news_with_impact", max_results=max_results) as span:
+        global vol_shock_model
+        
+        if news_service is None:
+            raise HTTPException(status_code=503, detail="News service not available")
+        
+        if nlp_engine is None:
+            raise HTTPException(status_code=503, detail="NLP engine not available")
+        
+        if vol_shock_model is None:
+            vol_shock_model = VolShockModel()
+        
+        if risk_engine is None:
+            raise HTTPException(status_code=503, detail="Risk engine not available")
+        
+        try:
+            # Get baseline Greeks (before any news)
+            portfolio = _portfolios.get("FX-PORTFOLIO-01")
+            if not portfolio:
+                raise HTTPException(status_code=404, detail="Portfolio not found")
+            
+            baseline_surface = _current_vol_surface or create_mock_surface(datetime.now())
+            baseline_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=baseline_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            # Fetch recent news ONCE
+            headlines = await news_service.fetch_all_headlines()
+            headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:max_results]
+            
+            impact_results = []
+            
+            for h in headlines:
+                # Process through NLP
+                event_vector = nlp_engine.process_news_event(h)
+                
+                # Predict vol shock
+                vol_shock = vol_shock_model.predict_shock(event_vector)
+                
+                # Get shocked surface
+                shocked_surface, shocked_version = vol_surface_service.get_shocked_surface(baseline_surface, vol_shock)
+                
+                # Compute new Greeks
+                shocked_greeks = risk_engine.compute_portfolio_greeks(
+                    portfolio=portfolio,
+                    vol_surface=shocked_surface,
+                    spot_rates=_current_spot_rates,
+                    risk_free_rate=0.05
+                )
+                
+                # Calculate deltas
+                delta_delta = shocked_greeks.total_greeks.delta - baseline_greeks.total_greeks.delta
+                delta_gamma = shocked_greeks.total_greeks.gamma - baseline_greeks.total_greeks.gamma
+                delta_vega = shocked_greeks.total_greeks.vega - baseline_greeks.total_greeks.vega
+                delta_theta = shocked_greeks.total_greeks.theta - baseline_greeks.total_greeks.theta
+                delta_rho = shocked_greeks.total_greeks.rho - baseline_greeks.total_greeks.rho
+                
+                impact_results.append({
+                    "headline": h.headline,
+                    "source": h.source,
+                    "url": h.url,
+                    "published_at": h.published_at.isoformat() if h.published_at else None,
+                    "content": h.content,
+                    "event_type": event_vector.event_type.value,
+                    "sentiment": event_vector.sentiment.value,
+                    "sentiment_score": round(event_vector.sentiment_score, 3),
+                    "importance": round(event_vector.importance, 3),
+                    "greeks_impact": {
+                        "delta": round(delta_delta, 2),
+                        "gamma": round(delta_gamma, 4),
+                        "vega": round(delta_vega, 2),
+                        "theta": round(delta_theta, 2),
+                        "rho": round(delta_rho, 2)
+                    },
+                    "vol_shocks": {
+                        "1W_ATM": round(vol_shock.delta_1W_ATM, 5),
+                        "1M_ATM": round(vol_shock.delta_1M_ATM, 5),
+                        "3M_ATM": round(vol_shock.delta_3M_ATM, 5),
+                        "6M_ATM": round(vol_shock.delta_6M_ATM, 5),
+                        "1Y_ATM": round(vol_shock.delta_1Y_ATM, 5)
+                    }
+                })
+            
+            span.log(f"Processed {len(impact_results)} news with impact in single call")
+            
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "count": len(impact_results),
+                "baseline_greeks": baseline_greeks.total_greeks.to_dict(),
+                "news_impacts": impact_results
+            }
+        except Exception as e:
+            span.log(f"Failed to compute news with impact: {e}", level=40)
+            logger.error(f"Failed to compute news with impact: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
