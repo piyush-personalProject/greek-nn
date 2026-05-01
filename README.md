@@ -401,6 +401,36 @@ The system consists of 6 main modules:
 5. **NN Risk Engine** (`nn_risk_engine.py`) - Greeks computation (ONNX/PyTorch/Black-Scholes)
 6. **Alert System** (planned) - Risk limit monitoring and alerts
 
+### Logging System
+
+The project includes a comprehensive structured logging system with the following features:
+
+- **Distributed Tracing**: Correlation IDs, trace IDs, and span IDs for request tracing
+- **Context Propagation**: Automatic propagation of request context through all operations
+- **Performance Logging**: `PerformanceLogger` context manager and `@log_performance` decorator
+- **Structured Output**: JSON logging in production, colored output in development
+- **Thread-Safe**: Thread-safe ID generation for concurrent operations
+
+**Usage:**
+
+```python
+from logger import get_logger, log_performance, PerformanceLogger
+
+# Simple logging
+logger = get_logger(__name__)
+logger.info("Processing request", extra_fields={"request_id": "123"})
+
+# Performance context manager
+with PerformanceLogger("model_inference", logger) as perf:
+    result = model.predict(data)
+    perf.add_metric("input_size", len(data))
+
+# Decorator for functions
+@log_performance("database_query")
+def fetch_positions():
+    ...
+```
+
 ### Risk Engine Modes
 
 The risk engine supports multiple computation modes:

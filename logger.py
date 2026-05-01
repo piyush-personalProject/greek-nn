@@ -2,16 +2,46 @@
 """
 Structured logging with distributed tracing support.
 Provides correlation IDs, context propagation, and modular trace hierarchy.
+
+Usage:
+    from logger import get_logger, log_entry_exit, TracedContext
+    
+    logger = get_logger(__name__)
+    
+    @log_entry_exit
+    def my_function():
+        logger.info("Processing", extra_fields={"key": "value"})
+        
+    with TracedContext("operation", entity_id="123") as ctx:
+        ctx.log("Step 1 completed")
+        # do work
 """
+
 import logging
 import json
 import sys
 import uuid
 import functools
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, Callable
 from datetime import datetime
 from contextvars import ContextVar
+from functools import wraps
+import time
+import threading
+import asyncio
+
 from config import config
+
+# Thread-safe ID generation
+_counter_lock = threading.Lock()
+_counter = 0
+
+def _get_next_counter() -> int:
+    """Thread-safe counter for additional uniqueness."""
+    global _counter
+    with _counter_lock:
+        _counter += 1
+        return _counter
 
 
 # Context variables for distributed tracing
@@ -336,99 +366,201 @@ def create_trace(name: Optional[str] = None, trace_id: Optional[str] = None) -> 
 def log_entry_exit(func):
     """
     Decorator to automatically log function entry/exit with timing.
+    
     Usage:
         @log_entry_exit
         def my_function(arg1, arg2):
             ...
-    """
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        logger = get_logger(func.__module__)
-        func_name = func.__qualname__
-        
-        logger.debug(
-            f"ENTRY {func_name}",
-            extra_fields={
-                "function": func_name,
-                "args_count": len(args),
-                "kwargs_keys": list(kwargs.keys())
-            }
-        )
-        
-        start_time = datetime.utcnow()
-        try:
-            result = func(*args, **kwargs)
-            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
-            logger.debug(
-                f"EXIT {func_name}",
-                extra_fields={
-                    "function": func_name,
-                    "duration_ms": round(duration_ms, 2),
-                    "status": "success"
-                }
-            )
-            return result
-        except Exception as e:
-            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
-            logger.error(
-                f"EXIT {func_name} with exception: {e}",
-                extra_fields={
-                    "function": func_name,
-                    "duration_ms": round(duration_ms, 2),
-                    "status": "error",
-                    "exception_type": type(e).__name__
-                }
-            )
-            raise
     
-    return wrapper
+    Note: Prefer using @log_performance decorator for better structured logging.
+    """
+    return log_performance(func.__name__)(func)
 
 
 def log_async_entry_exit(func):
     """
     Decorator for async functions to log entry/exit with timing.
+    
+    Note: Prefer using @log_performance decorator for better structured logging.
     """
-    @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
-        logger = get_logger(func.__module__)
-        func_name = func.__qualname__
-        
-        logger.debug(
-            f"ENTRY {func_name}",
-            extra_fields={
-                "function": func_name,
-                "args_count": len(args),
-                "kwargs_keys": list(kwargs.keys())
-            }
+    return log_performance(func.__name__)(func)
+
+
+# Additional context keys for common operations
+class ContextKeys:
+    """Standard context key names for consistent logging."""
+    PORTFOLIO_ID = "portfolio_id"
+    POSITION_ID = "position_id"
+    EVENT_ID = "event_id"
+    SHOCK_ID = "shock_id"
+    TENOR = "tenor"
+    INSTRUMENT = "instrument"
+    USER_ID = "user_id"
+    REQUEST_ID = "request_id"
+    OPERATION = "operation"
+
+
+class PerformanceLogger:
+    """
+    Context manager for logging operation performance.
+    
+    Usage:
+        with PerformanceLogger("model_inference", logger) as perf:
+            # do work
+            perf.add_metric("input_size", len(data))
+            
+        # Automatically logs duration and any custom metrics
+    """
+    
+    def __init__(
+        self, 
+        operation: str, 
+        logger: 'BoundLogger' = None,
+        **initial_metrics
+    ):
+        self.operation = operation
+        self.logger = logger or get_logger("performance")
+        self.metrics: Dict[str, Any] = dict(initial_metrics)
+        self.start_time: float = time.monotonic()
+        self._token = None
+    
+    def __enter__(self) -> 'PerformanceLogger':
+        self.start_time = time.monotonic()
+        self.logger.debug(
+            f"START {self.operation}",
+            extra_fields={"operation": self.operation, "status": "started"}
         )
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        duration_ms = (time.monotonic() - self.start_time) * 1000
         
-        start_time = datetime.utcnow()
-        try:
-            result = await func(*args, **kwargs)
-            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
-            logger.debug(
-                f"EXIT {func_name}",
+        if exc_type:
+            self.logger.error(
+                f"FAIL {self.operation}: {exc_val}",
                 extra_fields={
-                    "function": func_name,
-                    "duration_ms": round(duration_ms, 2),
-                    "status": "success"
-                }
-            )
-            return result
-        except Exception as e:
-            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
-            logger.error(
-                f"EXIT {func_name} with exception: {e}",
-                extra_fields={
-                    "function": func_name,
+                    "operation": self.operation,
                     "duration_ms": round(duration_ms, 2),
                     "status": "error",
-                    "exception_type": type(e).__name__
+                    "error_type": exc_type.__name__,
+                    **self.metrics
                 }
             )
-            raise
+        else:
+            self.logger.info(
+                f"END {self.operation}",
+                extra_fields={
+                    "operation": self.operation,
+                    "duration_ms": round(duration_ms, 2),
+                    "status": "completed",
+                    **self.metrics
+                }
+            )
     
-    return wrapper
+    def add_metric(self, name: str, value: Any) -> None:
+        """Add a metric to be logged at end of operation."""
+        self.metrics[name] = value
+    
+    def add_metrics(self, **kwargs) -> None:
+        """Add multiple metrics."""
+        self.metrics.update(kwargs)
+
+
+def log_performance(operation: str = None):
+    """
+    Decorator for automatic performance logging.
+    
+    Usage:
+        @log_performance("database_query")
+        def fetch_data():
+            ...
+    """
+    def decorator(func: Callable) -> Callable:
+        op_name = operation or func.__name__
+        
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            logger = get_logger(func.__module__)
+            start = time.monotonic()
+            
+            logger.debug(
+                f"ENTRY {op_name}",
+                extra_fields={
+                    "function": op_name,
+                    "args_count": len(args),
+                    "kwargs_keys": list(kwargs.keys())
+                }
+            )
+            
+            try:
+                result = func(*args, **kwargs)
+                duration_ms = (time.monotonic() - start) * 1000
+                
+                logger.info(
+                    f"EXIT {op_name}",
+                    extra_fields={
+                        "function": op_name,
+                        "duration_ms": round(duration_ms, 2),
+                        "status": "success"
+                    }
+                )
+                return result
+            except Exception as e:
+                duration_ms = (time.monotonic() - start) * 1000
+                logger.error(
+                    f"EXCEPTION {op_name}: {e}",
+                    extra_fields={
+                        "function": op_name,
+                        "duration_ms": round(duration_ms, 2),
+                        "status": "error",
+                        "error_type": type(e).__name__
+                    }
+                )
+                raise
+        
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            logger = get_logger(func.__module__)
+            start = time.monotonic()
+            
+            logger.debug(
+                f"ENTRY {op_name}",
+                extra_fields={
+                    "function": op_name,
+                    "args_count": len(args),
+                    "kwargs_keys": list(kwargs.keys())
+                }
+            )
+            
+            try:
+                result = await func(*args, **kwargs)
+                duration_ms = (time.monotonic() - start) * 1000
+                
+                logger.info(
+                    f"EXIT {op_name}",
+                    extra_fields={
+                        "function": op_name,
+                        "duration_ms": round(duration_ms, 2),
+                        "status": "success"
+                    }
+                )
+                return result
+            except Exception as e:
+                duration_ms = (time.monotonic() - start) * 1000
+                logger.error(
+                    f"EXCEPTION {op_name}: {e}",
+                    extra_fields={
+                        "function": op_name,
+                        "duration_ms": round(duration_ms, 2),
+                        "status": "error",
+                        "error_type": type(e).__name__
+                    }
+                )
+                raise
+        
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        return sync_wrapper
 
 
 # Export for convenience

@@ -1,11 +1,36 @@
-# modules/vol_surface_service.py
+# vol_surface_service.py
 """
 Module 4: Vol Surface Service
 Maintains live vol surface, applies shocks, and serves to risk engine.
 Uses QuantLib for baseline surface and caching for performance.
+
+Architecture:
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    VolSurfaceService                        │
+    │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+    │  │Memory Cache│  │ Redis Cache │  │  QuantLib Backend   │  │
+    │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
+    │         │               │                    │              │
+    │         └───────────────┴────────────────────┘              │
+    │                         │                                    │
+    │              ┌─────────▼─────────┐                         │
+    │              │ get_baseline_surface│                         │
+    │              └─────────┬─────────┘                         │
+    │                        │                                    │
+    │              ┌─────────▼─────────┐                         │
+    │              │get_shocked_surface │                         │
+    │              └───────────────────┘                         │
+    └─────────────────────────────────────────────────────────────┘
+
+Usage:
+    from vol_surface_service import VolSurfaceService
+    
+    service = VolSurfaceService()
+    surface = service.get_baseline_surface(datetime.now())
+    shocked, version = service.get_shocked_surface(surface, vol_shock)
 """
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List, Any
 from datetime import datetime, timedelta
 import numpy as np
 from abc import ABC, abstractmethod
@@ -16,7 +41,7 @@ import pickle
 
 from config import config
 from schemas import VolSurface, VolShock
-from logger import get_logger
+from logger import get_logger, log_performance, PerformanceLogger
 
 logger = get_logger(__name__)
 
@@ -149,6 +174,16 @@ class VolSurfaceService:
         """
         Get baseline vol surface for a date.
         Checks memory cache -> Redis cache -> disk.
+        
+        Args:
+            date: The date for which to retrieve the vol surface
+            version: Surface version identifier (default: "latest")
+            
+        Returns:
+            VolSurface object with the baseline volatility data
+            
+        Raises:
+            ValueError: If no vol surface found for the given date/version
         """
         cache_key = self._cache_key(date, version)
         
@@ -172,10 +207,12 @@ class VolSurfaceService:
                 self.logger.warning(f"Redis get failed: {e}")
         
         # Fetch from backend
-        surface = self.backend.get_surface(date, version)
-        if surface:
-            self._cache_surface(cache_key, surface)
-            return surface
+        with PerformanceLogger("backend_fetch", self.logger, cache_key=cache_key) as perf:
+            surface = self.backend.get_surface(date, version)
+            if surface:
+                self._cache_surface(cache_key, surface)
+                perf.add_metric("surface_id", surface.snapshot_id)
+                return surface
         
         raise ValueError(f"Vol surface not found: {date} v{version}")
     
@@ -196,66 +233,91 @@ class VolSurfaceService:
         - delta_1Y_ATM -> 1Y tenor
         - delta_1M_25RR -> 1M 25-delta RR
         - delta_1M_25BF -> 1M 25-delta BF
-        """
         
-        # Clone baseline - convert to numpy array for math operations
-        shocked_vol = np.array(base_surface.volatilities)
-        
-        # Shock mapping: tenor_idx -> shock amount
-        tenor_shocks = {
-            0: shock.delta_1W_ATM,      # 1W
-            1: shock.delta_1M_ATM,      # 1M
-            2: shock.delta_3M_ATM,      # 3M
-            3: shock.delta_6M_ATM,      # 6M
-            4: shock.delta_1Y_ATM,      # 1Y
-        }
-        
-        # Apply shocks (multiplicative: vol_new = vol_old * (1 + shock))
-        for tenor_idx, shock_amount in tenor_shocks.items():
-            if tenor_idx < len(shocked_vol):
-                shocked_vol[tenor_idx][:] = shocked_vol[tenor_idx][:] * (1.0 + shock_amount)
-        
-        # Apply RR and BF shocks to 1M tenor (idx=1)
-        if len(shocked_vol) > 1:
-            # Assume strike indices: [ATM, +25RR, -25RR, +BF, -BF]
-            # RR: right wing (call) - left wing (put)
-            if len(shocked_vol[1]) > 2:
-                shocked_vol[1][1] = shocked_vol[1][1] * (1.0 + shock.delta_1M_25RR)  # +25RR
-                shocked_vol[1][2] = shocked_vol[1][2] * (1.0 + shock.delta_1M_25RR)  # -25RR
+        Args:
+            base_surface: The baseline volatility surface to shock
+            shock: The volatility shock to apply
             
-            # BF: (call + put) / 2 - ATM
-            if len(shocked_vol[1]) > 4:
-                shocked_vol[1][3] = shocked_vol[1][3] * (1.0 + shock.delta_1M_25BF)  # +BF
-                shocked_vol[1][4] = shocked_vol[1][4] * (1.0 + shock.delta_1M_25BF)  # -BF
-        
-        # Clamp to reasonable ranges (avoid negative or extreme vols)
-        shocked_vol = np.clip(shocked_vol, 0.001, 2.0)
-        
-        # Create new surface (convert numpy array back to list for VolSurface schema)
-        shocked_surface = VolSurface(
-            snapshot_id=f"{base_surface.snapshot_id}_shocked",
-            base_date=base_surface.base_date,
-            tenors=base_surface.tenors,
-            strikes=base_surface.strikes,
-            volatilities=shocked_vol.tolist(),
-            source=base_surface.source,
-            version=f"{base_surface.version}+shock_{shock.shock_id[:8]}"
-        )
-        
-        self.logger.info(
-            f"Applied shock {shock.shock_id} to surface {base_surface.snapshot_id}",
-            extra_fields={
-                "event_type": shock.event_vector.event_type,
-                "sentiment": shock.event_vector.sentiment,
-                "shock_1m_atm": shock.delta_1M_ATM
+        Returns:
+            Tuple of (shocked VolSurface, version string)
+        """
+        with PerformanceLogger("apply_shock", self.logger, 
+                              shock_id=shock.shock_id[:16],
+                              surface_id=base_surface.snapshot_id) as perf:
+            
+            # Clone baseline - convert to numpy array for math operations
+            shocked_vol = np.array(base_surface.volatilities)
+            
+            # Shock mapping: tenor_idx -> shock amount
+            tenor_shocks = {
+                0: shock.delta_1W_ATM,      # 1W
+                1: shock.delta_1M_ATM,      # 1M
+                2: shock.delta_3M_ATM,      # 3M
+                3: shock.delta_6M_ATM,      # 6M
+                4: shock.delta_1Y_ATM,      # 1Y
             }
-        )
-        
-        # Cache shocked surface
-        shock_key = self._shock_key(shock.shock_id)
-        self._cache_shocked_surface(shock_key, shocked_surface)
-        
-        return shocked_surface, shocked_surface.version
+            
+            # Track applied shocks for logging
+            applied_shocks = {}
+            
+            # Apply shocks (multiplicative: vol_new = vol_old * (1 + shock))
+            for tenor_idx, shock_amount in tenor_shocks.items():
+                if tenor_idx < len(shocked_vol):
+                    shocked_vol[tenor_idx][:] = shocked_vol[tenor_idx][:] * (1.0 + shock_amount)
+                    applied_shocks[f"tenor_{tenor_idx}"] = shock_amount
+            
+            # Apply RR and BF shocks to 1M tenor (idx=1)
+            if len(shocked_vol) > 1:
+                # Assume strike indices: [ATM, +25RR, -25RR, +BF, -BF]
+                # RR: right wing (call) - left wing (put)
+                if len(shocked_vol[1]) > 2:
+                    shocked_vol[1][1] = shocked_vol[1][1] * (1.0 + shock.delta_1M_25RR)  # +25RR
+                    shocked_vol[1][2] = shocked_vol[1][2] * (1.0 + shock.delta_1M_25RR)  # -25RR
+                    applied_shocks["1M_RR"] = shock.delta_1M_25RR
+                
+                # BF: (call + put) / 2 - ATM
+                if len(shocked_vol[1]) > 4:
+                    shocked_vol[1][3] = shocked_vol[1][3] * (1.0 + shock.delta_1M_25BF)  # +BF
+                    shocked_vol[1][4] = shocked_vol[1][4] * (1.0 + shock.delta_1M_25BF)  # -BF
+                    applied_shocks["1M_BF"] = shock.delta_1M_25BF
+            
+            perf.add_metrics(
+                applied_shocks_count=len(applied_shocks),
+                event_type=shock.event_vector.event_type.value
+            )
+            
+            # Clamp to reasonable ranges (avoid negative or extreme vols)
+            shocked_vol = np.clip(shocked_vol, 0.001, 2.0)
+            
+            # Create new surface (convert numpy array back to list for VolSurface schema)
+            shocked_surface = VolSurface(
+                snapshot_id=f"{base_surface.snapshot_id}_shocked",
+                base_date=base_surface.base_date,
+                tenors=base_surface.tenors,
+                strikes=base_surface.strikes,
+                volatilities=shocked_vol.tolist(),
+                source=base_surface.source,
+                version=f"{base_surface.version}+shock_{shock.shock_id[:8]}"
+            )
+            
+            self.logger.info(
+                f"Applied shock {shock.shock_id[:16]} to surface {base_surface.snapshot_id}",
+                extra_fields={
+                    "event_type": shock.event_vector.event_type.value,
+                    "sentiment": shock.event_vector.sentiment,
+                    "shock_1m_atm": shock.delta_1M_ATM,
+                    "shocked_version": shocked_surface.version,
+                    "tenors_affected": list(applied_shocks.keys())
+                }
+            )
+            
+            # Cache shocked surface
+            shock_key = self._shock_key(shock.shock_id)
+            self._cache_shocked_surface(shock_key, shocked_surface)
+            
+            perf.add_metric("shocked_version", shocked_surface.version)
+            
+            return shocked_surface, shocked_surface.version
     
     def _cache_surface(self, cache_key: str, surface: VolSurface) -> None:
         """Cache vol surface in memory and Redis."""
@@ -311,30 +373,48 @@ class VolSurfaceService:
         surface: VolSurface, 
         tenor: float
     ) -> float:
-        """Get ATM vol for a given tenor from surface."""
-        tenor_idx = np.searchsorted(surface.tenors, tenor)
-        tenor_idx = np.clip(tenor_idx, 0, len(surface.tenors) - 1)
-        return float(surface.volatilities[tenor_idx][0])  # ATM is index 0
+        """
+        Get ATM vol for a given tenor from surface.
+        
+        Args:
+            surface: The volatility surface to query
+            tenor: The time to expiration in years
+            
+        Returns:
+            ATM volatility at the specified tenor
+        """
+        with PerformanceLogger("get_vol_at_tenor", self.logger, tenor=tenor) as perf:
+            tenor_idx = np.searchsorted(surface.tenors, tenor)
+            tenor_idx = np.clip(tenor_idx, 0, len(surface.tenors) - 1)
+            vol = float(surface.volatilities[tenor_idx][0])  # ATM is index 0
+            perf.add_metric("vol", vol)
+            return vol
     
     def health_check(self) -> Dict[str, str]:
-        """Health check for vol surface service."""
-        health = {"vol_surface_service": "healthy"}
+        """
+        Health check for vol surface service.
         
-        # Check backend
-        if self.backend:
-            health["backend"] = "connected"
-        else:
-            health["backend"] = "unavailable"
+        Returns:
+            Dict with status of each component:
+            - vol_surface_service: Overall status
+            - backend: QuantLib/backend connection status
+            - redis: Redis connection status
+            - memory_cache: Memory cache status
+        """
+        health = {
+            "vol_surface_service": "healthy",
+            "backend": "connected" if self.backend else "unavailable",
+            "redis": "not_configured",
+            "memory_cache_entries": len(self._memory_cache)
+        }
         
         # Check Redis
         if self.redis:
             try:
                 self.redis.ping()
                 health["redis"] = "connected"
-            except:
-                health["redis"] = "disconnected"
-        else:
-            health["redis"] = "not_configured"
+            except Exception as e:
+                health["redis"] = f"error: {str(e)[:50]}"
         
         return health
 

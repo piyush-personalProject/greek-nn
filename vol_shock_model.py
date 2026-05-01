@@ -2,10 +2,40 @@
 """
 Module 3: Volatility Shock Model
 Neural network model to predict volatility surface changes from economic events.
+
+Architecture:
+    ┌─────────────────────────────────────────────────────────────┐
+    │                      VolShockModel                          │
+    │  ┌───────────────┐  ┌───────────────┐  ┌─────────────────┐  │
+    │  │   ONNX Mode   │  │  PyTorch Mode │  │  Rule-based     │  │
+    │  │ (production)  │  │    (dev)      │  │   (fallback)    │  │
+    │  └───────────────┘  └───────────────┘  └─────────────────┘  │
+    │         │                  │                    │            │
+    │         └──────────────────┴────────────────────┘            │
+    │                            │                                 │
+    │              ┌─────────────▼──────────────┐                  │
+    │              │     predict_shock          │                  │
+    │              │  (EventVector -> VolShock) │                  │
+    │              └────────────────────────────┘                  │
+    └─────────────────────────────────────────────────────────────┘
+
+Event Type Encoding:
+    - INTEREST_RATE: [1,0,0,0,0,0]
+    - INFLATION:     [0,1,0,0,0,0]
+    - EMPLOYMENT:     [0,0,1,0,0,0]
+    - CENTRAL_BANK:   [0,0,0,1,0,0]
+    - MACRO:          [0,0,0,0,1,0]
+    - UNKNOWN:        [0,0,0,0,0,1]
+
+Usage:
+    from vol_shock_model import VolShockModel
+    
+    model = VolShockModel()
+    shock = model.predict_shock(event_vector)
 """
 import logging
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from dataclasses import dataclass
 import hashlib
@@ -19,7 +49,7 @@ import onnxruntime as ort
 
 from config import config
 from schemas import EventVector, VolShock, EventType, Sentiment
-from logger import get_logger
+from logger import get_logger, log_performance, PerformanceLogger
 
 logger = get_logger(__name__)
 
@@ -214,55 +244,66 @@ class VolShockModel:
         Returns:
             VolShock with predicted deltas for each tenor
         """
-        # Generate shock ID
-        shock_id = self._generate_shock_id(event_vector)
-        
-        # Check cache
-        cached = self._get_cached_shock(shock_id)
-        if cached:
-            self.logger.debug(f"Cache hit for shock: {shock_id[:16]}")
-            return cached
-        
-        # Prepare input features
-        features = self._prepare_features(event_vector)
-        
-        # Predict based on model mode
-        if self.model_mode == "onnx":
-            deltas = self._predict_onnx(features)
-        elif self.model_mode == "pytorch":
-            deltas = self._predict_pytorch(features)
-        else:
-            deltas = self._predict_rulebased(event_vector)
-        
-        # Create VolShock
-        vol_shock = VolShock(
-            shock_id=shock_id,
-            event_vector=event_vector,
-            delta_1W_ATM=deltas[0],
-            delta_1M_ATM=deltas[1],
-            delta_3M_ATM=deltas[2],
-            delta_6M_ATM=deltas[3],
-            delta_1Y_ATM=deltas[4],
-            delta_1M_25RR=deltas[5],
-            delta_1M_25BF=deltas[6],
-            predicted_at=datetime.now(),
-            model_version=self.model_mode
-        )
-        
-        # Cache the prediction
-        self._cache_shock(shock_id, vol_shock)
-        
-        self.logger.info(
-            f"Predicted vol shock: {shock_id[:16]}...",
-            extra_fields={
-                "event_type": event_vector.event_type.value,
-                "sentiment": event_vector.sentiment.value,
-                "delta_1m_atm": round(vol_shock.delta_1M_ATM, 4),
-                "model_mode": self.model_mode
-            }
-        )
-        
-        return vol_shock
+        with PerformanceLogger("predict_shock", self.logger,
+                              event_type=event_vector.event_type.value,
+                              sentiment=event_vector.sentiment.value) as perf:
+            
+            # Generate shock ID
+            shock_id = self._generate_shock_id(event_vector)
+            
+            # Check cache
+            cached = self._get_cached_shock(shock_id)
+            if cached:
+                self.logger.debug(f"Cache hit for shock: {shock_id[:16]}")
+                perf.add_metric("cache_hit", True)
+                return cached
+            
+            # Prepare input features
+            features = self._prepare_features(event_vector)
+            
+            # Predict based on model mode
+            if self.model_mode == "onnx":
+                deltas = self._predict_onnx(features)
+            elif self.model_mode == "pytorch":
+                deltas = self._predict_pytorch(features)
+            else:
+                deltas = self._predict_rulebased(event_vector)
+            
+            # Create VolShock
+            vol_shock = VolShock(
+                shock_id=shock_id,
+                event_vector=event_vector,
+                delta_1W_ATM=deltas[0],
+                delta_1M_ATM=deltas[1],
+                delta_3M_ATM=deltas[2],
+                delta_6M_ATM=deltas[3],
+                delta_1Y_ATM=deltas[4],
+                delta_1M_25RR=deltas[5],
+                delta_1M_25BF=deltas[6],
+                predicted_at=datetime.now(),
+                model_version=self.model_mode
+            )
+            
+            # Cache the prediction
+            self._cache_shock(shock_id, vol_shock)
+            
+            self.logger.info(
+                f"Predicted vol shock: {shock_id[:16]}...",
+                extra_fields={
+                    "event_type": event_vector.event_type.value,
+                    "sentiment": event_vector.sentiment.value,
+                    "delta_1m_atm": round(vol_shock.delta_1M_ATM, 4),
+                    "model_mode": self.model_mode
+                }
+            )
+            
+            perf.add_metrics(
+                shock_id=shock_id[:16],
+                delta_1M_ATM=round(vol_shock.delta_1M_ATM, 4),
+                model_mode=self.model_mode
+            )
+            
+            return vol_shock
     
     def predict_batch(self, event_vectors: List[EventVector]) -> List[VolShock]:
         """

@@ -1,12 +1,37 @@
-# modules/nn_risk_engine.py
+# nn_risk_engine.py
 """
 Module 5: NN Risk Engine
 Computes portfolio Greeks using neural networks.
 Accepts vol surface as input array, uses ONNX for production inference.
+
+Architecture:
+    ┌─────────────────────────────────────────────────────────────┐
+    │                      NNRiskEngine                           │
+    │  ┌───────────────┐  ┌───────────────┐  ┌─────────────────┐  │
+    │  │   ONNX Mode   │  │  PyTorch Mode │  │ BlackScholes    │  │
+    │  │ (production)  │  │    (dev)      │  │   (fallback)    │  │
+    │  └───────────────┘  └───────────────┘  └─────────────────┘  │
+    │         │                  │                    │            │
+    │         └──────────────────┴────────────────────┘            │
+    │                            │                                 │
+    │              ┌─────────────▼──────────────┐                  │
+    │              │  compute_portfolio_greeks  │                  │
+    │              └─────────────┬──────────────┘                  │
+    │                            │                                 │
+    │              ┌─────────────▼──────────────┐                  │
+    │              │compute_impacted_greeks     │                  │
+    │              └────────────────────────────┘                  │
+    └─────────────────────────────────────────────────────────────┘
+
+Usage:
+    from nn_risk_engine import NNRiskEngine
+    
+    engine = NNRiskEngine(model_mode="auto")
+    greeks = engine.compute_portfolio_greeks(portfolio, vol_surface, spot_rates)
 """
 import logging
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 import time
 from dataclasses import dataclass
@@ -21,7 +46,7 @@ from schemas import (
     Portfolio, PortfolioPosition, Greeks, PortfolioGreeks, VolSurface,
     GreeksImpactWeights
 )
-from logger import get_logger
+from logger import get_logger, log_performance, PerformanceLogger
 
 logger = get_logger(__name__)
 
@@ -213,47 +238,59 @@ class NNRiskEngine:
         Returns:
             PortfolioGreeks with aggregated and position-level Greeks
         """
-        start_time = time.time()
-        
-        total_greeks = Greeks(
-            delta=0.0, gamma=0.0, vega=0.0, theta=0.0, rho=0.0
-        )
-        position_greeks: Dict[str, Greeks] = {}
-        
-        for position in portfolio.positions:
-            try:
-                # Get vol for this position's tenor
-                vol = self._get_vol_for_position(position, vol_surface)
-                
-                # Get spot for this instrument
-                spot = spot_rates.get(position.instrument, position.spot)
-                
-                # Compute Greeks
-                greeks = self._compute_position_greeks(
-                    position, spot, vol, risk_free_rate
-                )
-                
-                position_greeks[position.position_id] = greeks
-                total_greeks = total_greeks + greeks
-                
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to compute Greeks for position {position.position_id}: {e}",
-                    extra_fields={"position_id": position.position_id}
-                )
-                position_greeks[position.position_id] = Greeks(
-                    delta=0, gamma=0, vega=0, theta=0, rho=0
-                )
-        
-        computation_time = (time.time() - start_time) * 1000  # ms
-        
-        return PortfolioGreeks(
-            portfolio_id=portfolio.portfolio_id,
-            timestamp=datetime.now(),
-            vol_surface_version=vol_surface.version,
-            total_greeks=total_greeks,
-            position_greeks=position_greeks
-        )
+        with PerformanceLogger("compute_portfolio_greeks", self.logger,
+                              portfolio_id=portfolio.portfolio_id,
+                              position_count=len(portfolio.positions)) as perf:
+            
+            start_time = time.time()
+            
+            total_greeks = Greeks(
+                delta=0.0, gamma=0.0, vega=0.0, theta=0.0, rho=0.0
+            )
+            position_greeks: Dict[str, Greeks] = {}
+            errors = []
+            
+            for position in portfolio.positions:
+                try:
+                    # Get vol for this position's tenor
+                    vol = self._get_vol_for_position(position, vol_surface)
+                    
+                    # Get spot for this instrument
+                    spot = spot_rates.get(position.instrument, position.spot)
+                    
+                    # Compute Greeks
+                    greeks = self._compute_position_greeks(
+                        position, spot, vol, risk_free_rate
+                    )
+                    
+                    position_greeks[position.position_id] = greeks
+                    total_greeks = total_greeks + greeks
+                    
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to compute Greeks for position {position.position_id}: {e}",
+                        extra_fields={"position_id": position.position_id}
+                    )
+                    errors.append({"position_id": position.position_id, "error": str(e)})
+                    position_greeks[position.position_id] = Greeks(
+                        delta=0, gamma=0, vega=0, theta=0, rho=0
+                    )
+            
+            computation_time = (time.time() - start_time) * 1000  # ms
+            
+            perf.add_metrics(
+                computation_time_ms=round(computation_time, 2),
+                error_count=len(errors),
+                total_positions=len(portfolio.positions)
+            )
+            
+            return PortfolioGreeks(
+                portfolio_id=portfolio.portfolio_id,
+                timestamp=datetime.now(),
+                vol_surface_version=vol_surface.version,
+                total_greeks=total_greeks,
+                position_greeks=position_greeks
+            )
     
     def compute_impacted_greeks(
         self,
@@ -517,7 +554,17 @@ class NNRiskEngine:
         return bucketed_vega
     
     def health_check(self) -> Dict[str, str]:
-        """Health check for risk engine."""
+        """
+        Health check for risk engine.
+        
+        Returns:
+            Dict with status of each component:
+            - nn_risk_engine: Overall status
+            - model_mode: Current computation mode (onnx/pytorch/blackscholes)
+            - onnx_session: ONNX session status (if applicable)
+            - pytorch_model: PyTorch model status (if applicable)
+            - fallback_mode: Whether fallback mode is active
+        """
         health = {
             "nn_risk_engine": "healthy",
             "model_mode": self.model_mode
