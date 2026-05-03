@@ -275,3 +275,194 @@ class GreeksImpactWeights(BaseModel):
         spot_shock_factor = self.spot_shock_weight
         
         return (spot_factor, vol_shock_factor, spot_shock_factor)
+    
+    @classmethod
+    def compute_dynamic_weights(
+        cls,
+        news_importance: float = 0.5,
+        news_sentiment_score: float = 0.0,
+        spot_rate_change_pct: float = 0.0,
+        base_spot_rate: float = 1.0
+    ) -> "GreeksImpactWeights":
+        """
+        Compute dynamic weights based on news characteristics and spot rate movement.
+        
+        This method calculates optimal blending weights by considering:
+        1. News importance (higher importance → more weight to vol shock)
+        2. News sentiment (strong sentiment → more weight to vol shock)
+        3. Spot rate movement (larger move → more weight to spot shock)
+        
+        The formula balances:
+        - Vol shock impact from news events (importance-driven)
+        - Spot rate impact from market movement
+        
+        Args:
+            news_importance: News importance score (0-1)
+            news_sentiment_score: News sentiment score (-1 to 1)
+            spot_rate_change_pct: Spot rate change percentage (e.g., 0.5 for 0.5% move)
+            base_spot_rate: Base spot rate for normalization
+            
+        Returns:
+            GreeksImpactWeights with computed dynamic weights
+        """
+        # Normalize spot change to a 0-1 scale
+        # A 1% move is considered significant, so we cap at 1%
+        normalized_spot_change = min(abs(spot_rate_change_pct) / 1.0, 1.0)
+        
+        # Calculate vol shock weight based on news importance and sentiment strength
+        # Strong sentiment amplifies the importance effect
+        sentiment_strength = abs(news_sentiment_score)
+        vol_shock_factor = news_importance * (0.5 + 0.5 * sentiment_strength)
+        
+        # Calculate spot shock weight based on rate movement
+        spot_shock_factor = normalized_spot_change * 0.8  # Scale down to avoid over-weighting
+        
+        # Spot rate weight is the remainder
+        spot_rate_weight = max(0.0, 1.0 - vol_shock_factor - spot_shock_factor)
+        
+        # Ensure all weights are valid and normalize if needed
+        total = spot_rate_weight + vol_shock_factor + spot_shock_factor
+        if total > 1.0:
+            # Normalize to ensure weights sum to 1
+            scale = 1.0 / total
+            spot_rate_weight *= scale
+            vol_shock_factor *= scale
+            spot_shock_factor *= scale
+        
+        return cls(
+            spot_rate_weight=round(spot_rate_weight, 4),
+            vol_shock_weight=round(vol_shock_factor, 4),
+            spot_shock_weight=round(spot_shock_factor, 4)
+        )
+    
+    @classmethod
+    def from_news_and_spot(
+        cls,
+        event_vector_importance: float,
+        event_vector_sentiment_score: float,
+        pair_spot_change_pct: float,
+        pair_baseline_rate: float = 1.0
+    ) -> "GreeksImpactWeights":
+        """
+        Convenience method to create weights from an event vector and spot rate change.
+        
+        Args:
+            event_vector_importance: EventVector.importance (0-1)
+            event_vector_sentiment_score: EventVector.sentiment_score (-1 to 1)
+            pair_spot_change_pct: Spot rate change percentage for the pair
+            pair_baseline_rate: Baseline spot rate
+        """
+        return cls.compute_dynamic_weights(
+            news_importance=event_vector_importance,
+            news_sentiment_score=event_vector_sentiment_score,
+            spot_rate_change_pct=pair_spot_change_pct,
+            base_spot_rate=pair_baseline_rate
+        )
+
+
+# ==================== Spot Rate Schemas ====================
+
+class SpotRate(BaseModel):
+    """Single spot rate for a currency pair."""
+    pair: str = Field(..., description="Currency pair (e.g., EURUSD)")
+    rate: float = Field(..., description="Current spot rate")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When rate was fetched")
+    source: str = Field(default="forex_api", description="Data source")
+
+
+class SpotRateResponse(BaseModel):
+    """Response for spot rate queries."""
+    timestamp: datetime
+    rates: Dict[str, float]
+    is_stale: bool = False
+    source: str = "mock"
+
+
+class SpotRateChange(BaseModel):
+    """Change in spot rate from baseline."""
+    pair: str
+    current: float
+    baseline: float
+    change_pct: float
+    direction: str  # "up", "down", "unchanged"
+
+
+class SpotRateHistoryItem(BaseModel):
+    """Historical spot rate data point."""
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+# ==================== Alert Schemas ====================
+
+class SpotRateAlertData(BaseModel):
+    """Spot rate alert data."""
+    alert_id: str
+    pair: str
+    alert_type: str  # "move", "spike", "trend"
+    current_rate: float
+    baseline_rate: float
+    change_pct: float
+    threshold_pct: float
+    timestamp: datetime
+    message: str
+
+
+class RiskAlertData(BaseModel):
+    """Risk limit breach alert."""
+    alert_id: str
+    alert_type: str  # "greek_limit", "spot_alert", etc.
+    severity: str  # "low", "medium", "high"
+    title: str
+    message: str
+    current_value: float
+    threshold_value: float
+    timestamp: datetime
+    acknowledged: bool = False
+
+
+class AlertsResponse(BaseModel):
+    """Response containing all alerts."""
+    timestamp: datetime
+    spot_alerts: List[SpotRateAlertData] = Field(default_factory=list)
+    risk_alerts: List[RiskAlertData] = Field(default_factory=list)
+    total_count: int = 0
+
+
+# ==================== Combined Impact Schemas ====================
+
+class CombinedImpactRequest(BaseModel):
+    """Request for combined spot + vol shock impact."""
+    portfolio_id: str = "FX-PORTFOLIO-01"
+    weights: Optional[GreeksImpactWeights] = Field(
+        default=None,
+        description="Blending weights (defaults to vol_shock_weight=1.0)"
+    )
+    include_history: bool = Field(
+        default=False,
+        description="Include spot rate history in response"
+    )
+
+
+class SpotImpactData(BaseModel):
+    """Spot rate impact on Greeks."""
+    pair: str
+    rate_change_pct: float
+    estimated_delta_impact: float
+    estimated_gamma_impact: float
+
+
+class CombinedImpactResponse(BaseModel):
+    """Response with combined spot and vol shock impact."""
+    timestamp: datetime
+    portfolio_id: str
+    weights: GreeksImpactWeights
+    baseline_greeks: Greeks
+    current_greeks: Greeks
+    greeks_delta: Greeks
+    spot_impacts: List[SpotImpactData] = Field(default_factory=list)
+    vol_shock_impacts: List[Dict] = Field(default_factory=list)
+    combined_impact: Greeks

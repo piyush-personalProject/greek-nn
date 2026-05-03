@@ -20,13 +20,18 @@ from config import config
 from schemas import (
     Portfolio, PortfolioPosition, Greeks, PortfolioGreeks, VolSurface,
     ComputeRiskRequest, ComputeRiskResponse, RiskAlert, TradeCreate,
-    NewsEvent, EventVector, GreeksImpactWeights
+    NewsEvent, EventVector, GreeksImpactWeights,
+    SpotRateResponse, SpotRateChange, SpotRateHistoryItem,
+    SpotRateAlertData, RiskAlertData, AlertsResponse,
+    CombinedImpactRequest, CombinedImpactResponse, SpotImpactData
 )
 from nn_risk_engine import NNRiskEngine, BlackScholesGreeksCPU
 from vol_surface_service import VolSurfaceService, create_mock_surface
 from nlp_engine import NLPEngine
 from vol_shock_model import VolShockModel
 from news_ingestion import NewsIngestionService
+from services.forex_service import ForexService, get_forex_service, init_forex_service
+from services.alert_service import AlertService, get_alert_service, init_alert_service
 from logger import get_logger, create_trace, setup_logging
 
 # Initialize logging
@@ -75,6 +80,8 @@ vol_surface_service: Optional[VolSurfaceService] = None
 nlp_engine: Optional[NLPEngine] = None
 vol_shock_model: Optional[VolShockModel] = None
 news_service: Optional[NewsIngestionService] = None
+forex_service: Optional[ForexService] = None
+alert_service: Optional[AlertService] = None
 
 # In-memory portfolio store (replace with DB in production)
 _portfolios: Dict[str, Portfolio] = {}
@@ -124,7 +131,7 @@ manager = ConnectionManager()
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global risk_engine, vol_surface_service, nlp_engine, vol_shock_model, news_service, _current_vol_surface
+    global risk_engine, vol_surface_service, nlp_engine, vol_shock_model, news_service, forex_service, alert_service, _current_vol_surface
     
     logger.info("Initializing FX Greeks Risk API...")
     
@@ -155,6 +162,37 @@ async def startup_event():
         news_service = NewsIngestionService()
         logger.info("News Ingestion Service initialized")
     
+    # Initialize Forex Service for live spot rates
+    if config.enable_live_spot_rates:
+        forex_service = init_forex_service(
+            api_key=config.forex_api.api_key,
+            poll_interval=config.forex_api.poll_interval,
+            timeout=config.forex_api.timeout
+        )
+        logger.info("Forex Service initialized")
+        
+        # Fetch initial spot rates
+        try:
+            initial_rates = await forex_service.fetch_rates()
+            _current_spot_rates.update(initial_rates)
+            logger.info(f"Initial spot rates fetched: {len(initial_rates)} pairs")
+        except Exception as e:
+            logger.warning(f"Failed to fetch initial spot rates: {e}")
+    
+    # Initialize Alert Service
+    if config.enable_alerts:
+        alert_service = init_alert_service(
+            spot_move_threshold_pct=config.spot_alert.move_threshold_pct,
+            alert_cooldown_sec=config.spot_alert.alert_interval_sec,
+            max_alerts_per_hour=config.spot_alert.max_alerts_per_hour
+        )
+        logger.info("Alert Service initialized")
+        
+        # Start background spot rate alert monitor (60s interval)
+        if forex_service:
+            asyncio.create_task(_spot_rate_alert_monitor())
+            logger.info("Spot rate alert monitor started (60s interval)")
+    
     # Create mock vol surface for demo
     _current_vol_surface = create_mock_surface(
         base_date=datetime.now(),
@@ -165,6 +203,68 @@ async def startup_event():
     _create_demo_portfolio()
     
     logger.info("FX Greeks Risk API initialized successfully")
+
+
+async def _spot_rate_alert_monitor():
+    """
+    Background task to monitor spot rates and trigger alerts.
+    Polls every 60 seconds (1 minute) for more responsive alerts.
+    """
+    from services.forex_service import get_forex_service
+    from services.alert_service import get_alert_service
+    
+    poll_interval = 60  # 60 seconds (1 minute) for more responsive alert detection
+    
+    logger.info(f"Starting spot rate alert monitor (interval: {poll_interval}s)")
+    
+    while True:
+        try:
+            forex = get_forex_service()
+            alerts = get_alert_service()
+            
+            if forex and alerts:
+                # Fetch current rates
+                rates = await forex.fetch_rates()
+                
+                if rates:
+                    logger.info(f"Spot rate monitor: checking {len(rates)} pairs")
+                    
+                    for pair, rate in rates.items():
+                        change = forex.get_rate_change(pair)
+                        
+                        logger.info(f"Spot monitor checking {pair}: rate={rate}, change={change}")
+                        
+                        if change["current"] and change["baseline"]:
+                            # Check if alert should be triggered
+                            alert = alerts.check_spot_rate_alert(
+                                pair, rate, change["baseline"]
+                            )
+                            
+                            if alert:
+                                logger.warning(f"ALERT TRIGGERED: {alert.message}")
+                                # Broadcast alert via WebSocket if manager available
+                                if manager:
+                                    await manager.broadcast({
+                                        "type": "spot_alert",
+                                        "alert": {
+                                            "alert_id": alert.alert_id,
+                                            "pair": alert.pair,
+                                            "alert_type": alert.alert_type,
+                                            "current_rate": alert.current_rate,
+                                            "baseline_rate": alert.baseline_rate,
+                                            "change_pct": alert.change_pct,
+                                            "threshold_pct": alert.threshold_pct,
+                                            "timestamp": alert.timestamp.isoformat(),
+                                            "message": alert.message
+                                        }
+                                    })
+            else:
+                logger.warning("Spot rate monitor: services not available")
+                
+        except Exception as e:
+            logger.error(f"Spot rate monitor error: {e}")
+        
+        await asyncio.sleep(poll_interval)
 
 
 def _create_demo_portfolio():
@@ -262,6 +362,16 @@ async def health_check():
     else:
         services["news_service"] = "disabled"
     
+    if forex_service:
+        services["forex_service"] = forex_service.health_check()
+    else:
+        services["forex_service"] = "disabled"
+    
+    if alert_service:
+        services["alert_service"] = alert_service.health_check()
+    else:
+        services["alert_service"] = "disabled"
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -357,7 +467,10 @@ async def compute_impacted_greeks(
     portfolio_id: str,
     vol_shock_id: str,
     weights: Optional[GreeksImpactWeights] = None,
-    shocked_spot_rates: Optional[Dict[str, float]] = None
+    shocked_spot_rates: Optional[Dict[str, float]] = None,
+    news_importance: Optional[float] = Query(None, description="News importance (0-1) for dynamic weight calculation"),
+    news_sentiment_score: Optional[float] = Query(None, description="News sentiment score (-1 to 1) for dynamic weight calculation"),
+    spot_rate_change_pct: Optional[float] = Query(None, description="Spot rate change percentage for dynamic weight calculation")
 ):
     """
     Compute Greeks with weighting between live spot rate and news shock impact.
@@ -372,6 +485,14 @@ async def compute_impacted_greeks(
         vol_shock_id: ID of the vol shock to apply (from news impact)
         weights: Blending weights (default: vol_shock_weight=1.0 for full shock)
         shocked_spot_rates: Optional shocked spot rates for spot shock impact
+        news_importance: News importance (0-1) - if provided along with other params, weights are computed dynamically
+        news_sentiment_score: News sentiment score (-1 to 1) - if provided along with other params, weights are computed dynamically
+        spot_rate_change_pct: Spot rate change percentage - if provided along with other params, weights are computed dynamically
+        
+    Dynamic Weight Calculation:
+        If news_importance, news_sentiment_score, and spot_rate_change_pct are all provided,
+        weights will be computed dynamically using GreeksImpactWeights.compute_dynamic_weights()
+        based on news characteristics and spot rate movement.
     """
     from logger import get_tracer
     
@@ -388,8 +509,17 @@ async def compute_impacted_greeks(
         portfolio = _portfolios[portfolio_id]
         base_vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
         
-        # Default weights
-        if weights is None:
+        # Dynamic weight computation if all params provided
+        if news_importance is not None and news_sentiment_score is not None and spot_rate_change_pct is not None:
+            weights = GreeksImpactWeights.compute_dynamic_weights(
+                news_importance=news_importance,
+                news_sentiment_score=news_sentiment_score,
+                spot_rate_change_pct=spot_rate_change_pct,
+                base_spot_rate=1.0
+            )
+            span.log(f"Using dynamic weights: spot={weights.spot_rate_weight}, vol_shock={weights.vol_shock_weight}, spot_shock={weights.spot_shock_weight}")
+        elif weights is None:
+            # Default weights
             weights = GreeksImpactWeights(
                 spot_rate_weight=0.0,
                 vol_shock_weight=1.0,
@@ -578,6 +708,408 @@ async def get_spot_rates():
         "timestamp": datetime.now().isoformat(),
         "rates": _current_spot_rates
     }
+
+
+@app.get("/api/spot-rates/live")
+async def get_live_spot_rates():
+    """
+    Get live spot rates from forex API.
+    Fetches fresh rates from the configured forex data provider.
+    """
+    global forex_service
+    
+    if forex_service is None:
+        if not config.enable_live_spot_rates:
+            raise HTTPException(status_code=503, detail="Live spot rates disabled")
+        forex_service = init_forex_service()
+    
+    try:
+        rates = await forex_service.fetch_rates()
+        status = forex_service.get_status()
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "rates": rates,
+            "is_stale": status.get("is_stale", False),
+            "last_update": status.get("last_update"),
+            "source": "live" if config.forex_api.api_key else "mock"
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch live spot rates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/spot-rates/history")
+async def get_spot_rate_history(
+    pair: str = Query("EURUSD", description="Currency pair"),
+    days: int = Query(30, description="Number of days of history", ge=1, le=365)
+):
+    """
+    Get historical spot rate data for a currency pair.
+    """
+    global forex_service
+    
+    if forex_service is None:
+        forex_service = init_forex_service()
+    
+    try:
+        history = await forex_service.fetch_historical(pair, days)
+        return {
+            "pair": pair,
+            "days": days,
+            "timestamp": datetime.now().isoformat(),
+            "history": history
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch spot rate history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/spot-rates/changes")
+async def get_spot_rate_changes():
+    """
+    Get spot rate changes from baseline.
+    Shows how much each rate has moved from its baseline value.
+    """
+    global forex_service
+    
+    if forex_service is None:
+        if not config.enable_live_spot_rates:
+            raise HTTPException(status_code=503, detail="Live spot rates disabled")
+        forex_service = init_forex_service()
+    
+    changes = []
+    for pair in _current_spot_rates.keys():
+        change = forex_service.get_rate_change(pair)
+        if change["current"]:
+            direction = "up" if change["current"] > change["baseline"] else "down" if change["current"] < change["baseline"] else "unchanged"
+            changes.append({
+                "pair": pair,
+                "current": change["current"],
+                "baseline": change["baseline"],
+                "change_pct": change["change_pct"],
+                "direction": direction
+            })
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "changes": changes
+    }
+
+
+@app.post("/api/spot-rates/baseline")
+async def update_spot_baseline():
+    """
+    Update the baseline rates to current rates.
+    This resets the change tracking.
+    """
+    global forex_service
+    
+    if forex_service is None:
+        raise HTTPException(status_code=503, detail="Forex service not available")
+    
+    forex_service.update_baseline()
+    
+    return {
+        "status": "success",
+        "message": "Baseline updated to current rates",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+# ==================== Alert Endpoints ====================
+
+@app.get("/api/alerts/spot-rates")
+async def get_spot_rate_alerts(
+    pair: Optional[str] = Query(None, description="Filter by currency pair"),
+    limit: int = Query(50, description="Maximum alerts to return", ge=1, le=200)
+):
+    """
+    Get spot rate movement alerts.
+    """
+    global alert_service
+    
+    if alert_service is None:
+        alert_service = init_alert_service()
+    
+    alerts = alert_service.get_spot_alerts(pair=pair, limit=limit)
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "count": len(alerts),
+        "alerts": [
+            {
+                "alert_id": a.alert_id,
+                "pair": a.pair,
+                "alert_type": a.alert_type,
+                "current_rate": a.current_rate,
+                "baseline_rate": a.baseline_rate,
+                "change_pct": a.change_pct,
+                "threshold_pct": a.threshold_pct,
+                "timestamp": a.timestamp.isoformat(),
+                "message": a.message
+            }
+            for a in alerts
+        ]
+    }
+
+
+@app.get("/api/alerts/all")
+async def get_all_alerts(
+    since: Optional[str] = Query(None, description="ISO timestamp to filter alerts"),
+    limit: int = Query(100, description="Maximum alerts per category", ge=1, le=200)
+):
+    """
+    Get all alerts (spot rate + risk limits).
+    """
+    global alert_service
+    
+    if alert_service is None:
+        alert_service = init_alert_service()
+    
+    since_dt = datetime.fromisoformat(since) if since else None
+    result = alert_service.get_all_alerts(since=since_dt, limit=limit)
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "spot_alerts": [
+            {
+                "alert_id": a.alert_id,
+                "pair": a.pair,
+                "alert_type": a.alert_type,
+                "current_rate": a.current_rate,
+                "baseline_rate": a.baseline_rate,
+                "change_pct": a.change_pct,
+                "threshold_pct": a.threshold_pct,
+                "timestamp": a.timestamp.isoformat(),
+                "message": a.message
+            }
+            for a in result["spot_alerts"]
+        ],
+        "risk_alerts": [
+            {
+                "alert_id": a.alert_id,
+                "alert_type": a.alert_type,
+                "severity": a.severity,
+                "title": a.title,
+                "message": a.message,
+                "current_value": a.current_value,
+                "threshold_value": a.threshold_value,
+                "timestamp": a.timestamp.isoformat(),
+                "acknowledged": a.acknowledged
+            }
+            for a in result["risk_alerts"]
+        ],
+        "total_count": len(result["spot_alerts"]) + len(result["risk_alerts"])
+    }
+
+
+@app.post("/api/alerts/{alert_id}/acknowledge")
+async def acknowledge_alert(alert_id: str):
+    """
+    Acknowledge an alert.
+    """
+    global alert_service
+    
+    if alert_service is None:
+        raise HTTPException(status_code=503, detail="Alert service not available")
+    
+    success = alert_service.acknowledge_alert(alert_id)
+    
+    if success:
+        return {"status": "success", "alert_id": alert_id}
+    else:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+
+# ==================== Combined Impact Endpoint ====================
+
+@app.post("/api/impact/combined")
+async def get_combined_impact(
+    request: CombinedImpactRequest = None
+):
+    """
+    Calculate combined impact from spot rate movements and news-driven vol shocks.
+    
+    This endpoint blends:
+    - Live spot rate movements (from forex API)
+    - News-driven volatility shocks (from NLP + Vol Shock Model)
+    
+    Using configurable weights in GreeksImpactWeights.
+    """
+    from logger import get_tracer
+    
+    global forex_service, alert_service
+    
+    with get_tracer().start_span("combined_impact") as span:
+        portfolio_id = request.portfolio_id if request else "FX-PORTFOLIO-01"
+        
+        if portfolio_id not in _portfolios:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        
+        portfolio = _portfolios[portfolio_id]
+        base_vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        # Default weights: 30% spot rate, 70% vol shock
+        weights = request.weights if request and request.weights else GreeksImpactWeights(
+            spot_rate_weight=0.3,
+            vol_shock_weight=0.7
+        )
+        
+        span.log(f"Computing combined impact with weights: spot={weights.spot_rate_weight}, vol_shock={weights.vol_shock_weight}")
+        
+        try:
+            # 1. Get live spot rates
+            if forex_service is None and config.enable_live_spot_rates:
+                forex_service = init_forex_service()
+            
+            live_rates = {}
+            spot_impacts = []
+            if forex_service and config.enable_live_spot_rates:
+                live_rates = await forex_service.fetch_rates()
+                
+                # Calculate spot rate impacts for each pair
+                for pair, rate in live_rates.items():
+                    change = forex_service.get_rate_change(pair)
+                    if change["current"] and change["baseline"]:
+                        # Rough estimate of Greek impact from spot move
+                        # Delta impact proportional to rate change * notional
+                        spot_impact_pct = change["change_pct"] / 100
+                        
+                        # Find positions for this pair
+                        pair_positions = [p for p in portfolio.positions if p.instrument == pair]
+                        for pos in pair_positions:
+                            estimated_delta = pos.quantity * spot_impact_pct
+                            estimated_gamma = abs(pos.quantity) * spot_impact_pct * 0.1  # Simplified
+                            
+                            spot_impacts.append({
+                                "pair": pair,
+                                "rate_change_pct": change["change_pct"],
+                                "estimated_delta_impact": estimated_delta,
+                                "estimated_gamma_impact": estimated_gamma
+                            })
+                        
+                        # Check for spot rate alert
+                        if alert_service and config.enable_alerts:
+                            alert = alert_service.check_spot_rate_alert(
+                                pair, rate, change["baseline"]
+                            )
+                            if alert:
+                                span.log(f"Spot alert triggered for {pair}")
+                        
+                        # Update global rates
+                        _current_spot_rates[pair] = rate
+            
+            # 2. Get baseline Greeks
+            baseline_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=base_vol_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            # 3. Get latest news and process through NLP/Vol Shock
+            vol_shock_impacts = []
+            if news_service and nlp_engine and vol_shock_model and vol_surface_service:
+                headlines = await news_service.fetch_all_headlines()
+                headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:5]
+                
+                for h in headlines:
+                    event_vector = nlp_engine.process_news_event(h)
+                    vol_shock = vol_shock_model.predict_shock(event_vector)
+                    shocked_surface, _ = vol_surface_service.get_shocked_surface(base_vol_surface, vol_shock)
+                    
+                    # Compute shocked Greeks
+                    shocked_greeks = risk_engine.compute_portfolio_greeks(
+                        portfolio=portfolio,
+                        vol_surface=shocked_surface,
+                        spot_rates=_current_spot_rates,
+                        risk_free_rate=0.05
+                    )
+                    
+                    vol_shock_impacts.append({
+                        "headline": h.headline,
+                        "event_type": event_vector.event_type.value,
+                        "sentiment": event_vector.sentiment.value,
+                        "vol_shocks": {
+                            "1W_ATM": round(vol_shock.delta_1W_ATM, 5),
+                            "1M_ATM": round(vol_shock.delta_1M_ATM, 5),
+                            "3M_ATM": round(vol_shock.delta_3M_ATM, 5),
+                        },
+                        "greeks_delta": {
+                            "delta": round(shocked_greeks.total_greeks.delta - baseline_greeks.total_greeks.delta, 2),
+                            "vega": round(shocked_greeks.total_greeks.vega - baseline_greeks.total_greeks.vega, 2),
+                        }
+                    })
+            
+            # 4. Calculate combined impact using blending weights
+            # Current Greeks use blended approach
+            current_greeks = baseline_greeks.total_greeks
+            
+            # For spot impact, we apply spot_rate_weight to adjust Greeks
+            # For vol shock, we apply vol_shock_weight
+            
+            # Calculate spot contribution (simplified - uses estimated impacts)
+            spot_delta_total = sum(s.get("estimated_delta_impact", 0) for s in spot_impacts)
+            spot_gamma_total = sum(s.get("estimated_gamma_impact", 0) for s in spot_impacts)
+            
+            # Calculate vol shock contribution from most impactful news
+            vol_delta_total = 0.0
+            vol_vega_total = 0.0
+            if vol_shock_impacts:
+                # Use the most impactful news for vol shock
+                most_impactful = max(vol_shock_impacts, key=lambda x: abs(x["greeks_delta"].get("vega", 0)))
+                vol_delta_total = most_impactful["greeks_delta"].get("delta", 0)
+                vol_vega_total = most_impactful["greeks_delta"].get("vega", 0)
+            
+            # Blend the impacts
+            blended_delta = (
+                baseline_greeks.total_greeks.delta +
+                (spot_delta_total * weights.spot_rate_weight) +
+                (vol_delta_total * weights.vol_shock_weight)
+            )
+            blended_vega = (
+                baseline_greeks.total_greeks.vega +
+                (spot_gamma_total * weights.spot_rate_weight * 100) +  # Approximate conversion
+                (vol_vega_total * weights.vol_shock_weight)
+            )
+            
+            # Calculate deltas
+            delta_delta = blended_delta - baseline_greeks.total_greeks.delta
+            delta_vega = blended_vega - baseline_greeks.total_greeks.vega
+            
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "portfolio_id": portfolio_id,
+                "weights": {
+                    "spot_rate_weight": weights.spot_rate_weight,
+                    "vol_shock_weight": weights.vol_shock_weight
+                },
+                "baseline_greeks": baseline_greeks.total_greeks.to_dict(),
+                "current_greeks": {
+                    "delta": round(blended_delta, 2),
+                    "gamma": baseline_greeks.total_greeks.gamma,
+                    "vega": round(blended_vega, 2),
+                    "theta": baseline_greeks.total_greeks.theta,
+                    "rho": baseline_greeks.total_greeks.rho
+                },
+                "greeks_delta": {
+                    "delta": round(delta_delta, 2),
+                    "gamma": 0,
+                    "vega": round(delta_vega, 2),
+                    "theta": 0,
+                    "rho": 0
+                },
+                "spot_impacts": spot_impacts,
+                "vol_shock_impacts": vol_shock_impacts[:3],  # Top 3
+                "live_rates": live_rates if live_rates else _current_spot_rates,
+                "source": "live" if live_rates else "cached"
+            }
+            
+        except Exception as e:
+            span.log(f"Failed to compute combined impact: {e}", level=40)
+            logger.error(f"Failed to compute combined impact: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/vol-surface")

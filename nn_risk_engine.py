@@ -333,7 +333,7 @@ class NNRiskEngine:
         
         spot_factor, vol_shock_factor, spot_shock_factor = weights.to_blend_factors()
         
-        # Compute Greeks with base state
+        # Compute Greeks with base state (base spot + base vol)
         base_greeks = self.compute_portfolio_greeks(
             portfolio=portfolio,
             vol_surface=base_vol_surface,
@@ -341,48 +341,73 @@ class NNRiskEngine:
             risk_free_rate=risk_free_rate
         )
         
-        # Determine which spot rates to use for shocked calculation
-        if shocked_spot_rates is not None and spot_shock_factor > 0:
-            shocked_spots = shocked_spot_rates
-        else:
-            shocked_spots = base_spot_rates
-        
-        # Compute Greeks with shocked state
-        shocked_greeks = self.compute_portfolio_greeks(
+        # Compute Greeks with shocked vol surface (using base spot rates)
+        # This captures vol shock impact
+        shocked_vol_greeks = self.compute_portfolio_greeks(
             portfolio=portfolio,
             vol_surface=shocked_vol_surface,
-            spot_rates=shocked_spots,
+            spot_rates=base_spot_rates,
             risk_free_rate=risk_free_rate
         )
         
+        # Compute Greeks with shocked spot rates (using base vol surface)
+        # This captures spot rate movement impact
+        if shocked_spot_rates is not None and spot_shock_factor > 0:
+            shocked_spot_greeks = self.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=base_vol_surface,
+                spot_rates=shocked_spot_rates,
+                risk_free_rate=risk_free_rate
+            )
+        else:
+            # No spot shock - use base Greeks as placeholder
+            shocked_spot_greeks = base_greeks
+        
         # Blend the Greeks based on weights
-        # Formula: impacted = base * spot_factor + shocked * vol_shock_factor + spot_shocked * spot_shock_factor
+        # Formula: impacted = base * spot_factor + shocked_vol * vol_shock_factor + shocked_spot * spot_shock_factor
         # Where spot_factor + vol_shock_factor + spot_shock_factor = 1.0
         
         total_greeks = Greeks(
-            delta=base_greeks.total_greeks.delta * spot_factor + shocked_greeks.total_greeks.delta * vol_shock_factor,
-            gamma=base_greeks.total_greeks.gamma * spot_factor + shocked_greeks.total_greeks.gamma * vol_shock_factor,
-            vega=base_greeks.total_greeks.vega * spot_factor + shocked_greeks.total_greeks.vega * vol_shock_factor,
-            theta=base_greeks.total_greeks.theta * spot_factor + shocked_greeks.total_greeks.theta * vol_shock_factor,
-            rho=base_greeks.total_greeks.rho * spot_factor + shocked_greeks.total_greeks.rho * vol_shock_factor,
-            vanna=self._blend_optional(base_greeks.total_greeks.vanna, shocked_greeks.total_greeks.vanna, spot_factor, vol_shock_factor),
-            volga=self._blend_optional(base_greeks.total_greeks.volga, shocked_greeks.total_greeks.volga, spot_factor, vol_shock_factor)
+            delta=base_greeks.total_greeks.delta * spot_factor + shocked_vol_greeks.total_greeks.delta * vol_shock_factor + shocked_spot_greeks.total_greeks.delta * spot_shock_factor,
+            gamma=base_greeks.total_greeks.gamma * spot_factor + shocked_vol_greeks.total_greeks.gamma * vol_shock_factor + shocked_spot_greeks.total_greeks.gamma * spot_shock_factor,
+            vega=base_greeks.total_greeks.vega * spot_factor + shocked_vol_greeks.total_greeks.vega * vol_shock_factor + shocked_spot_greeks.total_greeks.vega * spot_shock_factor,
+            theta=base_greeks.total_greeks.theta * spot_factor + shocked_vol_greeks.total_greeks.theta * vol_shock_factor + shocked_spot_greeks.total_greeks.theta * spot_shock_factor,
+            rho=base_greeks.total_greeks.rho * spot_factor + shocked_vol_greeks.total_greeks.rho * vol_shock_factor + shocked_spot_greeks.total_greeks.rho * spot_shock_factor,
+            vanna=self._blend_three_optional(
+                base_greeks.total_greeks.vanna, 
+                shocked_vol_greeks.total_greeks.vanna, 
+                shocked_spot_greeks.total_greeks.vanna,
+                spot_factor, vol_shock_factor, spot_shock_factor
+            ),
+            volga=self._blend_three_optional(
+                base_greeks.total_greeks.volga, 
+                shocked_vol_greeks.total_greeks.volga, 
+                shocked_spot_greeks.total_greeks.volga,
+                spot_factor, vol_shock_factor, spot_shock_factor
+            )
         )
         
         # Blend position-level Greeks
         position_greeks: Dict[str, Greeks] = {}
         for pos_id in base_greeks.position_greeks:
             base_pos = base_greeks.position_greeks.get(pos_id, Greeks(delta=0, gamma=0, vega=0, theta=0, rho=0))
-            shocked_pos = shocked_greeks.position_greeks.get(pos_id, Greeks(delta=0, gamma=0, vega=0, theta=0, rho=0))
+            shocked_vol_pos = shocked_vol_greeks.position_greeks.get(pos_id, Greeks(delta=0, gamma=0, vega=0, theta=0, rho=0))
+            shocked_spot_pos = shocked_spot_greeks.position_greeks.get(pos_id, Greeks(delta=0, gamma=0, vega=0, theta=0, rho=0))
             
             position_greeks[pos_id] = Greeks(
-                delta=base_pos.delta * spot_factor + shocked_pos.delta * vol_shock_factor,
-                gamma=base_pos.gamma * spot_factor + shocked_pos.gamma * vol_shock_factor,
-                vega=base_pos.vega * spot_factor + shocked_pos.vega * vol_shock_factor,
-                theta=base_pos.theta * spot_factor + shocked_pos.theta * vol_shock_factor,
-                rho=base_pos.rho * spot_factor + shocked_pos.rho * vol_shock_factor,
-                vanna=self._blend_optional(base_pos.vanna, shocked_pos.vanna, spot_factor, vol_shock_factor),
-                volga=self._blend_optional(base_pos.volga, shocked_pos.volga, spot_factor, vol_shock_factor)
+                delta=base_pos.delta * spot_factor + shocked_vol_pos.delta * vol_shock_factor + shocked_spot_pos.delta * spot_shock_factor,
+                gamma=base_pos.gamma * spot_factor + shocked_vol_pos.gamma * vol_shock_factor + shocked_spot_pos.gamma * spot_shock_factor,
+                vega=base_pos.vega * spot_factor + shocked_vol_pos.vega * vol_shock_factor + shocked_spot_pos.vega * spot_shock_factor,
+                theta=base_pos.theta * spot_factor + shocked_vol_pos.theta * vol_shock_factor + shocked_spot_pos.theta * spot_shock_factor,
+                rho=base_pos.rho * spot_factor + shocked_vol_pos.rho * vol_shock_factor + shocked_spot_pos.rho * spot_shock_factor,
+                vanna=self._blend_three_optional(
+                    base_pos.vanna, shocked_vol_pos.vanna, shocked_spot_pos.vanna,
+                    spot_factor, vol_shock_factor, spot_shock_factor
+                ),
+                volga=self._blend_three_optional(
+                    base_pos.volga, shocked_vol_pos.volga, shocked_spot_pos.volga,
+                    spot_factor, vol_shock_factor, spot_shock_factor
+                )
             )
         
         computation_time = (time.time() - start_time) * 1000  # ms
@@ -408,6 +433,27 @@ class NNRiskEngine:
         base_val = base_val or 0.0
         shocked_val = shocked_val or 0.0
         return base_val * spot_factor + shocked_val * vol_shock_factor
+    
+    @staticmethod
+    def _blend_three_optional(
+        base_val: Optional[float],
+        shocked_vol_val: Optional[float],
+        shocked_spot_val: Optional[float],
+        spot_factor: float,
+        vol_shock_factor: float,
+        spot_shock_factor: float
+    ) -> Optional[float]:
+        """Blend three optional Greek values with three factors."""
+        if base_val is None and shocked_vol_val is None and shocked_spot_val is None:
+            return None
+        base_val = base_val or 0.0
+        shocked_vol_val = shocked_vol_val or 0.0
+        shocked_spot_val = shocked_spot_val or 0.0
+        return (
+            base_val * spot_factor + 
+            shocked_vol_val * vol_shock_factor + 
+            shocked_spot_val * spot_shock_factor
+        )
     
     def _get_vol_for_position(self, position: PortfolioPosition, 
                              vol_surface: VolSurface) -> float:

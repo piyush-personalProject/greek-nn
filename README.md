@@ -18,6 +18,8 @@ The GreekNN Risk System is a modular Python library designed for financial insti
 - **Multi-tier Caching**: Memory → Redis → Disk for low-latency surface retrieval
 - **FastAPI Backend**: REST API with WebSocket support for real-time updates
 - **Web UI**: Dashboard for portfolio management and Greeks visualization
+- **Live Forex Integration**: Real-time spot rate fetching via Alpha Vantage/Frankfurter APIs
+- **Alert System**: Spot rate movement alerts and risk limit breach monitoring
 
 ## News-Driven Risk Assessment
 
@@ -65,6 +67,9 @@ greek_nn/
 ├── vol_shock_model.py       # Module 3: Volatility Shock Prediction
 ├── nn_risk_engine.py         # Module 5: Neural Network Risk Engine
 ├── vol_surface_service.py    # Module 4: Vol Surface Service
+├── services/                 # Service modules
+│   ├── alert_service.py      # Module 6: Alert System (spot rate & risk alerts)
+│   └── forex_service.py      # Live forex spot rate integration
 ├── requirements.txt          # Python dependencies
 ├── run_tests.py             # Test runner script
 ├── pytest.ini               # Pytest configuration
@@ -80,6 +85,8 @@ greek_nn/
 │   ├── ARCHITECTURE.md      # System architecture (with wireframes)
 │   ├── API.md               # API reference
 │   └── TRACEABILITY.md     # Requirements traceability
+├── plans/                   # Implementation plans
+│   └── live_spot_rate_integration_plan.md
 └── tests/                   # Unit tests
     ├── __init__.py
     ├── conftest.py          # Pytest fixtures
@@ -88,6 +95,8 @@ greek_nn/
     ├── test_news_ingestion.py
     ├── test_nlp_engine.py
     ├── test_vol_shock_model.py
+    ├── test_alert_service.py
+    ├── test_forex_service.py
     └── test_schemas.py
 ```
 
@@ -392,14 +401,15 @@ print(f"Tenors: {surface.tenors}")
 
 ## Architecture
 
-The system consists of 6 main modules:
+The system consists of 7 main modules:
 
 1. **News Ingestion** (`news_ingestion.py`) - Real-time headline aggregation from NewsAPI, RSS feeds
 2. **NLP Processing** (`nlp_engine.py`) - Event vector extraction using FinBERT sentiment analysis
 3. **Vol Shock Model** (`vol_shock_model.py`) - Predicts vol surface changes from events
 4. **Vol Surface Service** (`vol_surface_service.py`) - Surface management, caching, and shock application
 5. **NN Risk Engine** (`nn_risk_engine.py`) - Greeks computation (ONNX/PyTorch/Black-Scholes)
-6. **Alert System** (planned) - Risk limit monitoring and alerts
+6. **Alert System** (`services/alert_service.py`) - Risk limit monitoring and spot rate alerts
+7. **Forex Service** (`services/forex_service.py`) - Live forex spot rate integration with Alpha Vantage/Frankfurter APIs
 
 ### Logging System
 

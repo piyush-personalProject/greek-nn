@@ -22,6 +22,7 @@ import json
 import sys
 import uuid
 import functools
+import inspect
 from typing import Any, Dict, Optional, Union, Callable
 from datetime import datetime
 from contextvars import ContextVar
@@ -187,6 +188,25 @@ def get_logger(name: str) -> 'BoundLogger':
     return BoundLogger(base_logger)
 
 
+class ContextAdapter(logging.LoggerAdapter):
+    """
+    Logger adapter that properly injects context into LogRecord
+    while preserving call site information (filename, line number, function).
+    
+    This solves the issue with BoundLogger._make_record using makeRecord()
+    which sets incorrect call site info.
+    """
+    
+    def __init__(self, logger: logging.Logger, context: Dict[str, Any]):
+        super().__init__(logger, extra=context)
+    
+    def log(self, level: int, msg: str, *args, **kwargs) -> None:
+        """Log with proper call site info."""
+        # Process injects the extra context into kwargs
+        msg, kwargs = self.process(msg, kwargs)
+        self.logger.log(level, msg, *args, **kwargs)
+
+
 class BoundLogger:
     """
     Logger wrapper that automatically includes trace context.
@@ -206,8 +226,27 @@ class BoundLogger:
         context = {**request_ctx, **extra_fields}
         
         if context:
+            # Get call site info from the stack
+            # The logging module walks the stack, so we need to provide proper call site
+            # We'll use findCaller to get accurate info, then create record with that
+            frame = inspect.currentframe()
+            caller_frame = frame.f_back if frame else None  # _make_record caller
+            caller_frame = caller_frame.f_back if caller_frame else None  # BoundLogger.info caller
+            
+            if caller_frame:
+                caller_info = {
+                    'filename': caller_frame.f_code.co_filename,
+                    'lineno': caller_frame.f_lineno,
+                    'funcName': caller_frame.f_code.co_name
+                }
+            else:
+                caller_info = {'filename': '(unknown)', 'lineno': 0, 'funcName': '(unknown)'}
+            
+            # Create record with proper call site info
             record = self._logger.makeRecord(
-                self._logger.name, level, "(unknown)", 0, msg, args, None
+                self._logger.name, level, 
+                caller_info['filename'], caller_info['lineno'],
+                msg, args, None, caller_info['funcName']
             )
             record._context = context
             self._logger.handle(record)

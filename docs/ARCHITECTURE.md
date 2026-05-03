@@ -217,11 +217,26 @@ News Headline                    EventVector                    VolShock
   - ONNX (requires `models/risk_nn.onnx`)
   - PyTorch (planned)
 
-### Module 6: Alert System
-- **Status**: ⚠️ Planned
-- **Responsibility**: Monitor risk limits and generate alerts
-- **Limits**: Vega (100K), Gamma (50K), Delta (500K), Rho (100K), Shock (1%)
-- **Output**: RiskAlert with exceeded value and recommended action
+### Module 6: Alert System (`services/alert_service.py`)
+- **Status**: ✅ Implemented
+- **Responsibility**: Monitor risk limits and spot rate movements
+- **Features**:
+  - Spot rate movement monitoring (move, spike, trend detection)
+  - Risk limit monitoring (vega, gamma, delta, rho)
+  - Threshold-based alert generation with severity levels
+  - Alert cooldown and rate limiting
+  - Alert acknowledgment and cleanup
+- **Alert Types**: SpotRateAlert, RiskAlert
+
+### Module 7: Forex Service (`services/forex_service.py`)
+- **Status**: ✅ Implemented
+- **Responsibility**: Real-time forex spot rate integration
+- **Features**:
+  - Live spot rate fetching via Alpha Vantage and Frankfurter APIs
+  - Multi-currency support (EURUSD, USDJPY, GBPUSD, USDCHF, AUDUSD, USDCAD, NZDUSD)
+  - Baseline rate tracking and change calculation
+  - Historical data retrieval
+  - Fallback to mock data when APIs unavailable
 
 ### API Server (`api.py`)
 - **File**: `api.py`
@@ -251,6 +266,8 @@ News Headline                    EventVector                    VolShock
 | Cache | Redis | Vol surface caching | ✅ Optional |
 | Database | PostgreSQL | Persistence | ⚠️ Planned |
 | News APIs | NewsAPI, RSS | News ingestion | ✅ |
+| Forex APIs | Alpha Vantage, Frankfurter | Live spot rates | ✅ Implemented |
+| Alert System | Custom | Risk/spot alerts | ✅ Implemented |
 | Logging | structlog | Structured JSON logging | ✅ |
 | Testing | pytest | Unit tests | ✅ |
 | Monitoring | Prometheus | Metrics | ✅ Available |
@@ -642,6 +659,9 @@ greek_nn/
 ├── vol_shock_model.py       # Module 3: Volatility shock prediction
 ├── nn_risk_engine.py         # Module 5: Risk engine with Greeks computation
 ├── vol_surface_service.py    # Module 4: Vol surface management
+├── services/                 # Service modules
+│   ├── alert_service.py      # Module 6: Alert system
+│   └── forex_service.py      # Module 7: Forex spot rate service
 ├── requirements.txt          # Python dependencies
 ├── run_tests.py             # Test runner
 ├── pytest.ini               # Pytest configuration
@@ -657,6 +677,8 @@ greek_nn/
 │   ├── ARCHITECTURE.md       # This file
 │   ├── API.md               # API reference
 │   └── TRACEABILITY.md      # Requirements traceability
+├── plans/                   # Implementation plans
+│   └── live_spot_rate_integration_plan.md
 └── tests/
     ├── __init__.py
     ├── conftest.py          # Pytest fixtures
@@ -665,6 +687,8 @@ greek_nn/
     ├── test_news_ingestion.py
     ├── test_nlp_engine.py   # Module 2 tests
     ├── test_vol_shock_model.py  # Module 3 tests
+    ├── test_alert_service.py    # Module 6 tests
+    ├── test_forex_service.py    # Module 7 tests
     └── test_schemas.py
 ```
 

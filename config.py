@@ -79,6 +79,23 @@ class RiskLimits:
 
 
 @dataclass
+class ForexConfig:
+    """Forex API configuration for live spot rates."""
+    api_key: str = field(default_factory=lambda: os.getenv("FOREX_API_KEY", ""))
+    provider: str = field(default_factory=lambda: os.getenv("FOREX_PROVIDER", "alpha_vantage"))
+    poll_interval: int = field(default_factory=lambda: int(os.getenv("FOREX_POLL_INTERVAL", "60")))
+    timeout: int = 30
+
+
+@dataclass
+class SpotAlertConfig:
+    """Spot rate alert configuration."""
+    move_threshold_pct: float = field(default_factory=lambda: float(os.getenv("SPOT_MOVE_THRESHOLD", "0.1")))
+    alert_interval_sec: int = field(default_factory=lambda: int(os.getenv("SPOT_ALERT_INTERVAL", "60")))
+    max_alerts_per_hour: int = field(default_factory=lambda: int(os.getenv("SPOT_MAX_ALERTS_PER_HOUR", "10")))
+
+
+@dataclass
 class AppConfig:
     """Master configuration."""
     # Environment
@@ -96,12 +113,15 @@ class AppConfig:
     news_api: NewsAPIConfig = field(default_factory=NewsAPIConfig)
     ml: MLConfig = field(default_factory=MLConfig)
     risk_limits: RiskLimits = field(default_factory=RiskLimits)
+    forex_api: ForexConfig = field(default_factory=ForexConfig)
+    spot_alert: SpotAlertConfig = field(default_factory=SpotAlertConfig)
     
     # Feature flags
     enable_news_ingestion: bool = field(default_factory=lambda: os.getenv("ENABLE_NEWS", "true").lower() == "true")
     enable_nlp_engine: bool = field(default_factory=lambda: os.getenv("ENABLE_NLP", "true").lower() == "true")
     enable_vol_shock: bool = field(default_factory=lambda: os.getenv("ENABLE_VOL_SHOCK", "true").lower() == "true")
     enable_alerts: bool = field(default_factory=lambda: os.getenv("ENABLE_ALERTS", "false").lower() == "true")
+    enable_live_spot_rates: bool = field(default_factory=lambda: os.getenv("ENABLE_LIVE_SPOT", "true").lower() == "true")
     
     def __post_init__(self):
         """Validate configuration after initialization."""

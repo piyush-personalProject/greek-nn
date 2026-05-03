@@ -5,17 +5,25 @@ let ws = null;
 let currentPortfolio = 'FX-PORTFOLIO-01';
 let ladderChart = null;
 let impactChart = null;
+let spotImpactChart = null;
 let gaugeContexts = {};
 let currentGreeks = {
     delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0
 };
 let currentHeadlines = [];
 let currentImpactData = null;
+let currentSpotRates = {};
+let currentSpotChanges = [];
 let activeTab = 'news';
 let newsPollInterval = null;
+let spotRatesPollInterval = null;
+let alertsPollInterval = null;
+let currentAlerts = { spot_alerts: [], risk_alerts: [] };
 
 // Polling intervals (in milliseconds)
 const NEWS_POLL_INTERVAL = 60000; // 60 seconds
+const SPOT_RATES_POLL_INTERVAL = 30000; // 30 seconds for live spot rates
+const ALERTS_POLL_INTERVAL = 15000; // 15 seconds for alerts (faster polling to catch spot rate alerts)
 const IMPACT_POLL_INTERVAL = 120000; // 120 seconds (longer since it's heavier)
 
 // ==================== Initialization ====================
@@ -41,6 +49,21 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeChart();
     } catch (e) {
         console.error('Chart init error:', e);
+    }
+    try {
+        startAutoPolling();
+    } catch (e) {
+        console.error('Auto polling init error:', e);
+    }
+    try {
+        startSpotRatesPolling();
+    } catch (e) {
+        console.error('Spot rates polling init error:', e);
+    }
+    try {
+        startAlertsPolling();
+    } catch (e) {
+        console.error('Alerts polling init error:', e);
     }
 });
 
@@ -101,6 +124,18 @@ function handleWebSocketMessage(data) {
         showAlert('info', 'Trade Removed', `Trade ${data.trade_id} has been removed`);
         loadPortfolioPositions();
         loadGreeks();
+    } else if (data.type === 'spot_alert') {
+        // Spot rate alert triggered - show prominent notification
+        const alert = data.alert;
+        const direction = alert.change_pct > 0 ? '📈 UP' : '📉 DOWN';
+        showAlert(
+            'warning',
+            `Spot Alert: ${alert.pair}`,
+            `${direction} ${alert.change_pct.toFixed(3)}% (${alert.baseline_rate.toFixed(5)} → ${alert.current_rate.toFixed(5)})`,
+            8000 // Show for 8 seconds
+        );
+        // Refresh alerts list
+        loadAlerts();
     }
 }
 
@@ -303,19 +338,301 @@ function switchTab(tab) {
     console.log('Switched to tab:', tab);
 }
 
-// ==================== Auto Polling ====================
+// ==================== Spot Rates Polling ====================
 
-function startAutoPolling() {
-    console.log('Starting auto polling...');
+function startSpotRatesPolling() {
+    console.log('Starting spot rates polling...');
     
-    // Single call fetches both news AND impact data together
-    loadNewsWithImpact();
+    // Initial fetch
+    loadLiveSpotRates();
+    loadSpotRateChanges();
     
-    // Set up polling interval (refresh both news and impact together)
-    newsPollInterval = setInterval(() => {
-        console.log('Polling news with impact...');
-        loadNewsWithImpact();
-    }, NEWS_POLL_INTERVAL);
+    // Set up polling interval
+    spotRatesPollInterval = setInterval(() => {
+        loadLiveSpotRates();
+        loadSpotRateChanges();
+    }, SPOT_RATES_POLL_INTERVAL);
+}
+
+async function loadLiveSpotRates() {
+    try {
+        const response = await fetch('/api/spot-rates/live');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        currentSpotRates = data.rates || {};
+        
+        updateSpotRatesDisplay(data.rates, data.source);
+        
+        // Update timestamp
+        if (data.last_update) {
+            updateSpotTimestamp(data.last_update);
+        }
+    } catch (error) {
+        console.error('Failed to load live spot rates:', error);
+    }
+}
+
+async function loadSpotRateChanges() {
+    try {
+        const response = await fetch('/api/spot-rates/changes');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        currentSpotChanges = data.changes || [];
+        
+        updateSpotChangesDisplay(data.changes);
+    } catch (error) {
+        console.error('Failed to load spot rate changes:', error);
+    }
+}
+
+function updateSpotTimestamp(isoString) {
+    const el = document.getElementById('spotLastUpdate');
+    if (el && isoString) {
+        const date = new Date(isoString);
+        el.textContent = date.toLocaleTimeString();
+    }
+}
+
+// ==================== Alerts Polling ====================
+
+function startAlertsPolling() {
+    console.log('Starting alerts polling...');
+    
+    // Initial fetch
+    loadAlerts();
+    
+    // Set up polling interval
+    alertsPollInterval = setInterval(() => {
+        loadAlerts();
+    }, ALERTS_POLL_INTERVAL);
+}
+
+async function loadAlerts() {
+    try {
+        const response = await fetch('/api/alerts/all?limit=20');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        currentAlerts = {
+            spot_alerts: data.spot_alerts || [],
+            risk_alerts: data.risk_alerts || []
+        };
+        
+        updateAlertsDisplay(currentAlerts);
+        
+        // Update alert count badges
+        updateAlertBadges(currentAlerts);
+    } catch (error) {
+        console.error('Failed to load alerts:', error);
+    }
+}
+
+function updateAlertBadges(alerts) {
+    const spotBadge = document.getElementById('spotAlertBadge');
+    const riskBadge = document.getElementById('riskAlertBadge');
+    
+    if (spotBadge) {
+        spotBadge.textContent = alerts.spot_alerts.length;
+        spotBadge.style.display = alerts.spot_alerts.length > 0 ? 'inline' : 'none';
+    }
+    
+    if (riskBadge) {
+        riskBadge.textContent = alerts.risk_alerts.length;
+        riskBadge.style.display = alerts.risk_alerts.length > 0 ? 'inline' : 'none';
+    }
+}
+
+function updateAlertsDisplay(alerts) {
+    const container = document.getElementById('alertsList');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    const allAlerts = [
+        ...alerts.spot_alerts.map(a => ({...a, alert_category: 'spot'})),
+        ...alerts.risk_alerts.map(a => ({...a, alert_category: 'risk'}))
+    ];
+    
+    if (allAlerts.length === 0) {
+        container.innerHTML = '<div class="alerts-empty">No active alerts</div>';
+        return;
+    }
+    
+    allAlerts.slice(0, 20).forEach(alert => {
+        const div = document.createElement('div');
+        div.className = `alert-item ${alert.alert_category} ${alert.severity || ''}`;
+        
+        if (alert.alert_category === 'spot') {
+            const direction = alert.change_pct > 0 ? 'up' : 'down';
+            div.innerHTML = `
+                <div class="alert-header">
+                    <span class="alert-type">Spot ${alert.pair}</span>
+                    <span class="alert-time">${new Date(alert.timestamp).toLocaleTimeString()}</span>
+                </div>
+                <div class="alert-message">${alert.message}</div>
+                <div class="alert-detail">${direction === 'up' ? '+' : ''}${alert.change_pct.toFixed(3)}%</div>
+            `;
+        } else {
+            div.innerHTML = `
+                <div class="alert-header">
+                    <span class="alert-type ${alert.severity}">${alert.title}</span>
+                    <span class="alert-time">${new Date(alert.timestamp).toLocaleTimeString()}</span>
+                </div>
+                <div class="alert-message">${alert.message}</div>
+            `;
+        }
+        
+        container.appendChild(div);
+    });
+}
+
+// ==================== Combined Impact ====================
+
+async function loadCombinedImpact() {
+    try {
+        const response = await fetch('/api/impact/combined', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                portfolio_id: currentPortfolio,
+                weights: {
+                    spot_rate_weight: 0.3,
+                    vol_shock_weight: 0.7
+                }
+            })
+        });
+        
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        // Update display with combined impact
+        updateCombinedImpactDisplay(data);
+        
+    } catch (error) {
+        console.error('Failed to load combined impact:', error);
+    }
+}
+
+function updateCombinedImpactDisplay(data) {
+    // Update baseline vs current Greeks comparison
+    if (data.baseline_greeks && data.current_greeks) {
+        const baselineContainer = document.getElementById('baselineGreeks');
+        const currentContainer = document.getElementById('currentGreeks');
+        
+        if (baselineContainer && data.baseline_greeks) {
+            baselineContainer.innerHTML = `
+                <div class="greek-compare-item">
+                    <span class="label">Delta:</span>
+                    <span class="value">${formatNumber(data.baseline_greeks.delta, 2)}</span>
+                </div>
+                <div class="greek-compare-item">
+                    <span class="label">Vega:</span>
+                    <span class="value">${formatNumber(data.baseline_greeks.vega, 2)}</span>
+                </div>
+            `;
+        }
+        
+        if (currentContainer && data.current_greeks) {
+            const deltaDiff = data.greeks_delta?.delta || 0;
+            const vegaDiff = data.greeks_delta?.vega || 0;
+            
+            currentContainer.innerHTML = `
+                <div class="greek-compare-item">
+                    <span class="label">Delta:</span>
+                    <span class="value ${deltaDiff > 0 ? 'positive' : 'negative'}">${formatNumber(data.current_greeks.delta, 2)} (${deltaDiff > 0 ? '+' : ''}${formatNumber(deltaDiff, 2)})</span>
+                </div>
+                <div class="greek-compare-item">
+                    <span class="label">Vega:</span>
+                    <span class="value ${vegaDiff > 0 ? 'positive' : 'negative'}">${formatNumber(data.current_greeks.vega, 2)} (${vegaDiff > 0 ? '+' : ''}${formatNumber(vegaDiff, 2)})</span>
+                </div>
+            `;
+        }
+    }
+    
+    // Update spot impacts
+    if (data.spot_impacts && data.spot_impacts.length > 0) {
+        updateSpotImpactsDisplay(data.spot_impacts);
+    }
+}
+
+function updateSpotImpactsDisplay(spotImpacts) {
+    const container = document.getElementById('spotImpactsList');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    spotImpacts.forEach(impact => {
+        const div = document.createElement('div');
+        div.className = 'spot-impact-item';
+        
+        div.innerHTML = `
+            <div class="spot-impact-pair">${impact.pair}</div>
+            <div class="spot-impact-change ${impact.rate_change_pct > 0 ? 'positive' : 'negative'}">
+                ${impact.rate_change_pct > 0 ? '+' : ''}${impact.rate_change_pct.toFixed(3)}%
+            </div>
+            <div class="spot-impact-delta">
+                Est. Δ: ${formatNumber(impact.estimated_delta_impact, 0)}
+            </div>
+        `;
+        
+        container.appendChild(div);
+    });
+}
+
+// ==================== Display Updates ====================
+
+function updateSpotRatesDisplay(rates, source) {
+    const container = document.getElementById('spotRates');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Add source indicator
+    const sourceLabel = document.createElement('span');
+    sourceLabel.className = 'spot-source';
+    sourceLabel.textContent = source === 'live' ? '● LIVE' : '○ MOCK';
+    sourceLabel.style.cssText = source === 'live' ? 'color: #22c55e; font-size: 10px;' : 'color: #94a3b8; font-size: 10px;';
+    
+    for (const [pair, rate] of Object.entries(rates)) {
+        const div = document.createElement('div');
+        div.className = 'spot-rate-item';
+        
+        // Find change for this pair
+        const change = currentSpotChanges.find(c => c.pair === pair);
+        const changeClass = change ? (change.direction === 'up' ? 'positive' : change.direction === 'down' ? 'negative' : '') : '';
+        const changeStr = change ? `${change.direction === 'up' ? '↑' : change.direction === 'down' ? '↓' : '→'} ${Math.abs(change.change_pct).toFixed(2)}%` : '';
+        
+        div.innerHTML = `
+            <span class="pair">${pair}</span>
+            <span class="rate">${rate.toFixed(5)}</span>
+            <span class="change ${changeClass}">${changeStr}</span>
+        `;
+        container.appendChild(div);
+    }
+}
+
+function updateSpotChangesDisplay(changes) {
+    const container = document.getElementById('spotChanges');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    changes.forEach(change => {
+        const div = document.createElement('div');
+        div.className = 'spot-change-item';
+        
+        const direction = change.direction === 'up' ? '↑' : change.direction === 'down' ? '↓' : '→';
+        const colorClass = change.direction === 'up' ? 'positive' : change.direction === 'down' ? 'negative' : '';
+        
+        div.innerHTML = `
+            <span class="pair">${change.pair}</span>
+            <span class="change ${colorClass}">${direction} ${Math.abs(change.change_pct).toFixed(3)}%</span>
+        `;
+        container.appendChild(div);
+    });
 }
 
 async function loadNewsWithImpact() {
@@ -985,7 +1302,7 @@ async function handleTradeSubmit(event) {
 
 // ==================== Alerts ====================
 
-function showAlert(type, title, message) {
+function showAlert(type, title, message, duration = 5000) {
     const container = document.getElementById('alertsContainer');
     
     const alert = document.createElement('div');
@@ -1000,11 +1317,11 @@ function showAlert(type, title, message) {
     
     container.appendChild(alert);
     
-    // Auto-remove after 5 seconds
+    // Auto-remove after specified duration (default 5 seconds)
     setTimeout(() => {
         alert.style.opacity = '0';
         setTimeout(() => alert.remove(), 300);
-    }, 5000);
+    }, duration);
 }
 
 // ==================== Utilities ====================

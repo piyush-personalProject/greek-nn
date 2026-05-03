@@ -578,3 +578,143 @@ class TestImpactedGreeks:
         # Both present
         result = engine._blend_optional(10.0, 20.0, 0.5, 0.5)
         assert result == 15.0
+
+
+class TestDynamicWeights:
+    """Tests for dynamic weight computation based on news and spot rate."""
+    
+    def test_compute_dynamic_weights_basic(self):
+        """Test dynamic weight computation with basic inputs."""
+        from schemas import GreeksImpactWeights
+        
+        weights = GreeksImpactWeights.compute_dynamic_weights(
+            news_importance=0.5,
+            news_sentiment_score=0.0,
+            spot_rate_change_pct=0.0,
+            base_spot_rate=1.0
+        )
+        
+        assert 0 <= weights.spot_rate_weight <= 1.0
+        assert 0 <= weights.vol_shock_weight <= 1.0
+        assert 0 <= weights.spot_shock_weight <= 1.0
+        # Weights should sum to approximately 1.0
+        total = weights.spot_rate_weight + weights.vol_shock_weight + weights.spot_shock_weight
+        assert 0.99 <= total <= 1.01
+    
+    def test_compute_dynamic_weights_high_importance(self):
+        """Test that high news importance increases vol shock weight."""
+        from schemas import GreeksImpactWeights
+        
+        weights = GreeksImpactWeights.compute_dynamic_weights(
+            news_importance=1.0,
+            news_sentiment_score=0.5,
+            spot_rate_change_pct=0.0,
+            base_spot_rate=1.0
+        )
+        
+        # High importance with strong sentiment should give high vol_shock_weight
+        assert weights.vol_shock_weight >= 0.5
+    
+    def test_compute_dynamic_weights_high_spot_move(self):
+        """Test that high spot rate movement increases spot shock weight."""
+        from schemas import GreeksImpactWeights
+        
+        weights = GreeksImpactWeights.compute_dynamic_weights(
+            news_importance=0.3,
+            news_sentiment_score=0.0,
+            spot_rate_change_pct=0.8,  # 0.8% move - significant
+            base_spot_rate=1.0
+        )
+        
+        # Significant spot move should increase spot_shock_weight
+        assert weights.spot_shock_weight > 0
+    
+    def test_compute_dynamic_weights_normalization(self):
+        """Test that weights are properly normalized when they exceed 1.0."""
+        from schemas import GreeksImpactWeights
+        
+        # Very high importance + very high spot change could cause sum > 1
+        weights = GreeksImpactWeights.compute_dynamic_weights(
+            news_importance=1.0,
+            news_sentiment_score=1.0,
+            spot_rate_change_pct=1.0,  # 1% move - maxed out
+            base_spot_rate=1.0
+        )
+        
+        # Weights should still sum to approximately 1.0
+        total = weights.spot_rate_weight + weights.vol_shock_weight + weights.spot_shock_weight
+        assert 0.99 <= total <= 1.01
+    
+    def test_from_news_and_spot_convenience(self):
+        """Test the convenience method for creating weights from event vector."""
+        from schemas import GreeksImpactWeights
+        
+        weights = GreeksImpactWeights.from_news_and_spot(
+            event_vector_importance=0.7,
+            event_vector_sentiment_score=0.3,
+            pair_spot_change_pct=0.5,
+            pair_baseline_rate=1.0850
+        )
+        
+        assert 0 <= weights.spot_rate_weight <= 1.0
+        assert 0 <= weights.vol_shock_weight <= 1.0
+        assert 0 <= weights.spot_shock_weight <= 1.0
+    
+    def test_blend_three_optional_all_none(self):
+        """Test three-way blend when all values are None."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        result = engine._blend_three_optional(None, None, None, 0.3, 0.5, 0.2)
+        assert result is None
+    
+    def test_blend_three_optional_mixed_none(self):
+        """Test three-way blend with some None values."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        result = engine._blend_three_optional(10.0, None, 20.0, 0.3, 0.5, 0.2)
+        assert result == 10.0 * 0.3 + 20.0 * 0.2  # 3 + 4 = 7
+    
+    def test_blend_three_optional_all_present(self):
+        """Test three-way blend with all values present."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        result = engine._blend_three_optional(10.0, 20.0, 30.0, 0.3, 0.5, 0.2)
+        expected = 10.0 * 0.3 + 20.0 * 0.5 + 30.0 * 0.2
+        assert result == expected
+    
+    def test_impacted_greeks_three_way_blend(
+        self, sample_portfolio, mock_vol_surface, spot_rates
+    ):
+        """Test impacted Greeks with three-way blending (spot + vol shock + spot shock)."""
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        from schemas import GreeksImpactWeights
+        from vol_surface_service import create_mock_surface
+        
+        shocked_vol_surface = create_mock_surface(datetime.now(), base_vol=0.15)
+        
+        # Create shocked spot rates (10% move)
+        shocked_spot_rates = {
+            k: v * 1.1 for k, v in spot_rates.items()
+        }
+        
+        weights = GreeksImpactWeights(
+            spot_rate_weight=0.2,
+            vol_shock_weight=0.5,
+            spot_shock_weight=0.3
+        )
+        
+        result = engine.compute_impacted_greeks(
+            portfolio=sample_portfolio,
+            base_vol_surface=mock_vol_surface,
+            shocked_vol_surface=shocked_vol_surface,
+            base_spot_rates=spot_rates,
+            shocked_spot_rates=shocked_spot_rates,
+            weights=weights,
+            risk_free_rate=0.05
+        )
+        
+        assert result.portfolio_id == sample_portfolio.portfolio_id
+        assert isinstance(result.total_greeks, Greeks)
+        # Result should be a blend of three different states
+        assert result.total_greeks.vega != 0
