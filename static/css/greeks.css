@@ -577,6 +577,45 @@ body {
     color: white;
 }
 
+/* Alert Badge */
+.alert-badge {
+    background-color: var(--accent-red);
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    font-weight: 600;
+    animation: pulse 2s infinite;
+}
+
+/* Portfolio Select */
+.portfolio-select {
+    padding: 6px 32px 6px 12px;
+    background-color: var(--bg-card);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    transition: all 0.2s;
+}
+
+.portfolio-select:hover {
+    border-color: var(--text-muted);
+}
+
+.portfolio-select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
 /* Tab Content */
 .tab-content {
     display: none;
@@ -592,6 +631,47 @@ body {
 /* Greek Selector - hidden when on news tab */
 #ladderGreekSelector {
     display: flex;
+}
+
+#ladderGreekSelector select {
+    padding: 6px 32px 6px 12px;
+    background-color: var(--bg-card);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    transition: all 0.2s;
+}
+
+#ladderGreekSelector select:hover {
+    border-color: var(--text-muted);
+}
+
+#ladderGreekSelector select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+#ladderGreekSelector label {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    margin-right: 8px;
+    align-self: center;
+}
+
+/* Greek Selector wrapper */
+.greek-selector {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 /* News Impact Tab - Improved Layout */
@@ -1789,4 +1869,50 @@ body {
 .vol-shock-item {
     font-family: 'Monaco', 'Menlo', monospace;
     color: var(--accent-purple);
+}
+
+/* Alert List Items (in Alerts tab panel) */
+.alert-item {
+    background-color: var(--bg-card);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--text-muted);
+    transition: all 0.2s;
+}
+
+.alert-item:hover {
+    background-color: var(--bg-secondary);
+}
+
+.alert-item.spot {
+    border-left-color: var(--accent-yellow);
+}
+
+.alert-item.risk {
+    border-left-color: var(--accent-red);
+}
+
+.alert-item.severity-high {
+    border-left-color: var(--accent-red);
+    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(239, 68, 68, 0.08) 100%);
+}
+
+.alert-item.severity-medium {
+    border-left-color: var(--accent-yellow);
+    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(234, 179, 8, 0.08) 100%);
+}
+
+.alert-detail {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.alerts-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 24px;
+    text-align: center;
 }

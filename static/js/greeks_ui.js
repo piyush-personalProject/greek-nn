@@ -462,22 +462,26 @@ function updateAlertsDisplay(alerts) {
     
     allAlerts.slice(0, 20).forEach(alert => {
         const div = document.createElement('div');
-        div.className = `alert-item ${alert.alert_category} ${alert.severity || ''}`;
+        const severityClass = alert.severity ? `severity-${alert.severity}` : '';
+        div.className = `alert-item ${alert.alert_category} ${severityClass}`.trim();
         
         if (alert.alert_category === 'spot') {
             const direction = alert.change_pct > 0 ? 'up' : 'down';
+            const directionIcon = alert.change_pct > 0 ? '📈' : '📉';
+            const directionSign = alert.change_pct > 0 ? '+' : '';
             div.innerHTML = `
                 <div class="alert-header">
-                    <span class="alert-type">Spot ${alert.pair}</span>
+                    <span class="alert-type spot">${directionIcon} Spot ${alert.pair}</span>
                     <span class="alert-time">${new Date(alert.timestamp).toLocaleTimeString()}</span>
                 </div>
                 <div class="alert-message">${alert.message}</div>
-                <div class="alert-detail">${direction === 'up' ? '+' : ''}${alert.change_pct.toFixed(3)}%</div>
+                <div class="alert-detail">${directionSign}${alert.change_pct.toFixed(3)}%</div>
             `;
         } else {
+            const severityIcon = alert.severity === 'high' ? '🚨' : (alert.severity === 'medium' ? '⚠️' : 'ℹ️');
             div.innerHTML = `
                 <div class="alert-header">
-                    <span class="alert-type ${alert.severity}">${alert.title}</span>
+                    <span class="alert-type ${alert.severity || ''}">${severityIcon} ${alert.title}</span>
                     <span class="alert-time">${new Date(alert.timestamp).toLocaleTimeString()}</span>
                 </div>
                 <div class="alert-message">${alert.message}</div>
@@ -1322,9 +1326,18 @@ function showAlert(type, title, message, duration = 5000) {
     
     const alert = document.createElement('div');
     alert.className = `alert ${type}`;
+    
+    // Icon based on alert type
+    const icons = {
+        info: 'ℹ️',
+        warning: '⚠️',
+        error: '🚨',
+        success: '✅'
+    };
+    
     alert.innerHTML = `
         <div class="alert-header">
-            <span class="alert-type">${title}</span>
+            <span class="alert-type ${type}">${icons[type] || ''} ${title}</span>
             <span class="alert-time">${new Date().toLocaleTimeString()}</span>
         </div>
         <div class="alert-message">${message}</div>
