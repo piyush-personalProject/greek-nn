@@ -289,15 +289,31 @@ async function loadTimeLadder() {
 
 async function loadPortfolioPositions() {
     try {
+        console.log('Loading portfolio positions for:', currentPortfolio);
         const response = await fetch(`/api/portfolios/${currentPortfolio}`);
-        const data = await response.json();
+        console.log('Portfolio response status:', response.status);
         
-        if (data.positions) {
+        if (!response.ok) {
+            console.error('Failed to load portfolio, status:', response.status);
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('Portfolio data received:', data);
+        
+        if (data.positions && data.positions.length > 0) {
+            console.log('Found', data.positions.length, 'positions');
             // Get Greeks for each position
             const greeksResponse = await fetch(`/api/portfolios/${currentPortfolio}/greeks`);
             const greeksData = await greeksResponse.json();
+            console.log('Greeks data received:', greeksData);
             
             updatePositionsList(data.positions, greeksData.position_greeks || {});
+        } else {
+            console.log('No positions found in portfolio data');
+            // Show empty state
+            const container = document.getElementById('positionsList');
+            container.innerHTML = '<div class="positions-empty">No positions in portfolio</div>';
         }
     } catch (error) {
         console.error('Failed to load positions:', error);
@@ -1064,6 +1080,13 @@ function updateVolSurfaceDisplay(data) {
 function updatePositionsList(positions, positionGreeks) {
     const container = document.getElementById('positionsList');
     container.innerHTML = '';
+    
+    console.log('updatePositionsList called with', positions?.length, 'positions and greeks:', Object.keys(positionGreeks || {}));
+    
+    if (!positions || positions.length === 0) {
+        container.innerHTML = '<div class="positions-empty">No positions in portfolio</div>';
+        return;
+    }
     
     positions.forEach(pos => {
         const greeks = positionGreeks[pos.position_id] || {};

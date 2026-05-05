@@ -203,7 +203,43 @@ async def startup_event():
     # Create demo portfolio
     _create_demo_portfolio()
     
+    # Verify portfolio was created
+    portfolio = _portfolios.get("FX-PORTFOLIO-01")
+    if portfolio:
+        logger.info(f"Demo portfolio created with {len(portfolio.positions)} positions")
+    else:
+        logger.error("Failed to create demo portfolio!")
+    
     logger.info("FX Greeks Risk API initialized successfully")
+
+
+@app.get("/api/debug/portfolio-status")
+async def debug_portfolio_status():
+    """Debug endpoint to check portfolio status."""
+    portfolio = _portfolios.get("FX-PORTFOLIO-01")
+    if portfolio:
+        return {
+            "status": "ok",
+            "portfolio_id": portfolio.portfolio_id,
+            "positions_count": len(portfolio.positions),
+            "positions": [
+                {
+                    "position_id": p.position_id,
+                    "instrument": p.instrument,
+                    "strike": p.strike,
+                    "tenor": p.tenor,
+                    "quantity": p.quantity,
+                    "option_type": p.option_type
+                }
+                for p in portfolio.positions
+            ]
+        }
+    else:
+        return {
+            "status": "error",
+            "message": "Portfolio not found",
+            "available_portfolios": list(_portfolios.keys())
+        }
 
 
 async def _spot_rate_alert_monitor():

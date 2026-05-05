@@ -1916,3 +1916,11 @@ body {
     padding: 24px;
     text-align: center;
 }
+
+/* Positions Empty State */
+.positions-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 24px;
+    text-align: center;
+}
