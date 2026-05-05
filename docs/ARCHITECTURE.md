@@ -238,6 +238,20 @@ News Headline                    EventVector                    VolShock
   - Historical data retrieval
   - Fallback to mock data when APIs unavailable
 
+### Audit Service (`services/audit_service.py`)
+- **Status**: ✅ Implemented
+- **Responsibility**: Full pipeline traceability via SQLite in-memory database
+- **Features**:
+  - Trace IDs linking all pipeline stages: NewsEvent → EventVector → VolShock → VolSurface → GreeksSnapshot
+  - Thread-safe connections using shared cache for in-memory SQLite
+  - Full trace retrieval with all linked data
+  - Recent traces listing with status filtering
+  - Active traces monitoring
+- **API Endpoints**:
+  - `GET /api/audit/trace/{trace_id}` - Retrieve full pipeline trace
+  - `GET /api/audit/traces` - List recent traces
+  - `POST /api/audit/trace/{trace_id}/end` - Mark trace as completed
+
 ### API Server (`api.py`)
 - **File**: `api.py`
 - **Status**: ✅ Implemented
@@ -729,6 +743,85 @@ NewsEvent → EventVector → VolShock → VolSurface (shocked) → PortfolioGre
 - Shows event type, sentiment, and importance
 
 **UI Feature:** "Show Impact" button in News panel toggles between news list and news-with-impact view
+
+### Audit & Traceability
+
+The system provides full audit trail for the news-to-Greeks pipeline through the **Audit Service**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                         AUDIT SERVICE (SQLite In-Memory)                           │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│  ┌──────────────────────────────────────────────────────────────────────────────┐   │
+│  │                            PIPELINE TRACE FLOW                                │   │
+│  │                                                                              │   │
+│  │  NewsEvent ──▶ EventVector ──▶ VolShock ──▶ VolSurface ──▶ GreeksSnapshot   │   │
+│  │      │              │             │            │              │              │   │
+│  │      ▼              ▼             ▼            ▼              ▼              │   │
+│  │  ┌─────────┐   ┌───────────┐   ┌────────┐   ┌──────────┐   ┌───────────┐      │   │
+│  │  │  news_  │   │  event_   │   │  vol_  │   │  vol_    │   │  greeks_  │      │   │
+│  │  │ events  │   │  vectors  │   │ shocks │   │ surfaces │   │ snapshots │      │   │
+│  │  └─────────┘   └───────────┘   └────────┘   └──────────┘   └───────────┘      │   │
+│  │                                                                              │   │
+│  │                         All linked by trace_id                                │   │
+│  └──────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                      │
+│  ┌──────────────────────────────────────────────────────────────────────────────┐   │
+│  │                            DATABASE SCHEMA                                     │   │
+│  │                                                                              │   │
+│  │  traces(id, trace_id, created_at, status, completed_at, metadata)            │   │
+│  │       │                                                                       │   │
+│  │       ├──▶ news_events(trace_id, headline, source, url, published_at, ...)  │   │
+│  │       ├──▶ event_vectors(trace_id, event_id, event_type, sentiment, ...)   │   │
+│  │       ├──▶ vol_shocks(trace_id, shock_id, event_id, delta_1W_ATM, ...)     │   │
+│  │       ├──▶ vol_surfaces(trace_id, snapshot_id, shock_id, tenors, ...)       │   │
+│  │       └──▶ greeks_snapshots(trace_id, snapshot_id, portfolio_id, delta, ...)│   │
+│  │                                                                              │   │
+│  └──────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Trace ID Format:** `news-batch-{YYYYMMDD-HHMMSS}` (e.g., `news-batch-20260504-070551`)
+
+**API Endpoints for Audit:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/audit/trace/{trace_id}` | Get full pipeline trace with all stages |
+| GET | `/api/audit/traces` | List recent traces (supports `?status=active`) |
+| POST | `/api/audit/trace/{trace_id}/end` | Mark trace as completed |
+
+**Example Trace Retrieval:**
+
+```bash
+curl "http://localhost:8000/api/audit/trace/news-batch-20260504-070551"
+```
+
+Returns:
+```json
+{
+  "trace": {
+    "trace_id": "news-batch-20260504-070551",
+    "created_at": "2026-05-04T07:05:51",
+    "status": "active",
+    "completed_at": null
+  },
+  "news_events": [...],
+  "event_vectors": [...],
+  "vol_shocks": [...],
+  "vol_surfaces": [...],
+  "greeks_snapshots": [...]
+}
+```
+
+**Distributed Tracing Integration:**
+
+Every API request automatically receives a `X-Trace-ID` response header for correlation:
+- Request can include `X-Trace-ID` header to continue an existing trace
+- Middleware generates new trace ID if not provided
+- All log messages include trace context
 
 ## Version History
 

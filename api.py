@@ -32,6 +32,7 @@ from vol_shock_model import VolShockModel
 from news_ingestion import NewsIngestionService
 from services.forex_service import ForexService, get_forex_service, init_forex_service
 from services.alert_service import AlertService, get_alert_service, init_alert_service
+from services.audit_service import init_audit_service, get_audit_service
 from logger import get_logger, create_trace, setup_logging
 
 # Initialize logging
@@ -1248,19 +1249,36 @@ async def get_news_with_impact(max_results: int = 10):
             # Fetch recent news ONCE
             headlines = await news_service.fetch_all_headlines()
             headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:max_results]
-            
+
             impact_results = []
-            
+
+            # Initialize audit trace for this batch
+            trace_id = f"news-batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            audit = get_audit_service()
+            audit.begin_trace(trace_id)
+
             for h in headlines:
+                # Persist news event to audit trail
+                audit.persist_news_event(trace_id, h)
+
                 # Process through NLP
                 event_vector = nlp_engine.process_news_event(h)
-                
+
+                # Persist event vector to audit trail
+                audit.persist_event_vector(trace_id, event_vector)
+
                 # Predict vol shock
                 vol_shock = vol_shock_model.predict_shock(event_vector)
-                
+
+                # Persist vol shock to audit trail
+                audit.persist_vol_shock(trace_id, vol_shock)
+
                 # Get shocked surface
                 shocked_surface, shocked_version = vol_surface_service.get_shocked_surface(baseline_surface, vol_shock)
-                
+
+                # Persist vol surface to audit trail
+                audit.persist_vol_surface(trace_id, vol_shock.shock_id, shocked_surface)
+
                 # Compute new Greeks
                 shocked_greeks = risk_engine.compute_portfolio_greeks(
                     portfolio=portfolio,
@@ -1268,7 +1286,17 @@ async def get_news_with_impact(max_results: int = 10):
                     spot_rates=_current_spot_rates,
                     risk_free_rate=0.05
                 )
-                
+
+                # Persist Greeks to audit trail
+                greeks_snapshot_id = f"greeks-{event_vector.event_id}"
+                audit.persist_greeks(
+                    trace_id,
+                    portfolio.portfolio_id,
+                    shocked_surface.snapshot_id,
+                    shocked_greeks.total_greeks,
+                    greeks_snapshot_id
+                )
+
                 # Calculate deltas
                 delta_delta = shocked_greeks.total_greeks.delta - baseline_greeks.total_greeks.delta
                 delta_gamma = shocked_greeks.total_greeks.gamma - baseline_greeks.total_greeks.gamma
@@ -1306,6 +1334,7 @@ async def get_news_with_impact(max_results: int = 10):
             
             return {
                 "timestamp": datetime.now().isoformat(),
+                "trace_id": trace_id,
                 "count": len(impact_results),
                 "baseline_greeks": baseline_greeks.total_greeks.to_dict(),
                 "news_impacts": impact_results
@@ -1356,19 +1385,36 @@ async def get_news_impact(max_results: int = 10):
             # Fetch recent news
             headlines = await news_service.fetch_all_headlines()
             headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:max_results]
-            
+
             impact_results = []
-            
+
+            # Initialize audit trace for this batch
+            trace_id = f"news-batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            audit = get_audit_service()
+            audit.begin_trace(trace_id)
+
             for h in headlines:
+                # Persist news event to audit trail
+                audit.persist_news_event(trace_id, h)
+
                 # Process through NLP
                 event_vector = nlp_engine.process_news_event(h)
-                
+
+                # Persist event vector to audit trail
+                audit.persist_event_vector(trace_id, event_vector)
+
                 # Predict vol shock
                 vol_shock = vol_shock_model.predict_shock(event_vector)
-                
+
+                # Persist vol shock to audit trail
+                audit.persist_vol_shock(trace_id, vol_shock)
+
                 # Get shocked surface
                 shocked_surface, shocked_version = vol_surface_service.get_shocked_surface(baseline_surface, vol_shock)
-                
+
+                # Persist vol surface to audit trail
+                audit.persist_vol_surface(trace_id, vol_shock.shock_id, shocked_surface)
+
                 # Compute new Greeks
                 shocked_greeks = risk_engine.compute_portfolio_greeks(
                     portfolio=portfolio,
@@ -1376,7 +1422,17 @@ async def get_news_impact(max_results: int = 10):
                     spot_rates=_current_spot_rates,
                     risk_free_rate=0.05
                 )
-                
+
+                # Persist Greeks to audit trail
+                greeks_snapshot_id = f"greeks-{event_vector.event_id}"
+                audit.persist_greeks(
+                    trace_id,
+                    portfolio.portfolio_id,
+                    shocked_surface.snapshot_id,
+                    shocked_greeks.total_greeks,
+                    greeks_snapshot_id
+                )
+
                 # Calculate deltas
                 delta_delta = shocked_greeks.total_greeks.delta - baseline_greeks.total_greeks.delta
                 delta_gamma = shocked_greeks.total_greeks.gamma - baseline_greeks.total_greeks.gamma
@@ -1553,10 +1609,79 @@ async def delete_trade(trade_id: str, portfolio_id: str = "FX-PORTFOLIO-01"):
     return {"status": "success", "trade_id": trade_id}
 
 
+# ==================== Audit/Traceability Endpoints ====================
+
+@app.get("/api/audit/trace/{trace_id}")
+async def get_trace(trace_id: str):
+    """
+    Get full trace for news-to-Greeks pipeline.
+    
+    Returns all stages linked by trace_id:
+    - News events
+    - Event vectors (NLP output)
+    - Vol shocks
+    - Vol surfaces
+    - Greeks snapshots
+    """
+    from logger import get_tracer
+    
+    with get_tracer().start_span("audit_get_trace", trace_id=trace_id) as span:
+        audit = get_audit_service()
+        trace = audit.get_trace(trace_id)
+        
+        if not trace:
+            raise HTTPException(status_code=404, detail=f"Trace {trace_id} not found")
+        
+        return trace
+
+
+@app.get("/api/audit/traces")
+async def get_traces(limit: int = 20, status: Optional[str] = None):
+    """
+    Get recent traces, optionally filtered by status.
+    
+    Args:
+        limit: Maximum number of traces to return
+        status: Filter by status ('active', 'completed', 'error')
+    """
+    audit = get_audit_service()
+    
+    if status == "active":
+        traces = audit.get_active_traces()
+    elif status:
+        # Filter by status in-memory
+        all_traces = audit.get_recent_traces(limit * 2)
+        traces = [t for t in all_traces if t.get('status') == status][:limit]
+    else:
+        traces = audit.get_recent_traces(limit)
+    
+    return {
+        "count": len(traces),
+        "traces": traces
+    }
+
+
+@app.post("/api/audit/trace/{trace_id}/end")
+async def end_trace(trace_id: str, status: str = "completed"):
+    """
+    Mark a trace as ended.
+    
+    Args:
+        trace_id: Trace identifier
+        status: Final status ('completed', 'error')
+    """
+    audit = get_audit_service()
+    audit.end_trace(trace_id, status)
+    return {"status": "success", "trace_id": trace_id, "final_status": status}
+
+
 # ==================== Main Entry Point ====================
 
 def main():
     """Run the API server."""
+    # Initialize audit service
+    init_audit_service(":memory:")
+    
     uvicorn.run(
         "api:app",
         host=config.api_host,

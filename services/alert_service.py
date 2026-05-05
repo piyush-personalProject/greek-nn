@@ -34,6 +34,7 @@ class RiskAlert:
     """Risk limit breach alert."""
     alert_id: str
     alert_type: str  # "greek_limit", "spot_alert", etc.
+    greek_name: str  # Name of the greek that breached (delta, vega, gamma, rho)
     severity: str  # "low", "medium", "high"
     title: str
     message: str
@@ -189,6 +190,7 @@ class AlertService:
         alert = RiskAlert(
             alert_id=f"risk-{greek_name}-{int(datetime.now().timestamp())}",
             alert_type="greek_limit",
+            greek_name=greek_name,
             severity=severity,
             title=f"{greek_name.upper()} Limit Breached",
             message=(
@@ -281,9 +283,12 @@ class AlertService:
         Returns:
             Dict with 'spot_alerts' and 'risk_alerts' keys
         """
+        spot = self.get_spot_alerts(since=since, limit=limit)
+        risk = self.get_risk_alerts(since=since, limit=limit)
         return {
-            "spot_alerts": self.get_spot_alerts(since=since, limit=limit),
-            "risk_alerts": self.get_risk_alerts(since=since, limit=limit),
+            "spot_alerts": spot,
+            "risk_alerts": risk,
+            "total_count": len(spot) + len(risk),
             "timestamp": datetime.now().isoformat()
         }
     

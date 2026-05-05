@@ -159,6 +159,8 @@ The API will be available at `http://localhost:8000`. The web UI dashboard will 
 | GET | `/api/risk-summary` | Dashboard risk summary |
 | GET | `/api/news` | Get recent news headlines |
 | GET | `/api/news-impact` | **Get news with calculated impact on Greeks** |
+| GET | `/api/audit/trace/{trace_id}` | Get full audit trace for pipeline execution |
+| GET | `/api/audit/traces` | List recent audit traces |
 | POST | `/api/trades` | Create new trade |
 | DELETE | `/api/trades/{id}` | Delete trade |
 | WS | `/ws/greeks` | Real-time Greeks WebSocket |
@@ -439,6 +441,68 @@ with PerformanceLogger("model_inference", logger) as perf:
 @log_performance("database_query")
 def fetch_positions():
     ...
+```
+
+### Auditability & Traceability
+
+The system provides full audit trail for the news-to-Greeks pipeline through the **Audit Service**:
+
+- **SQLite In-Memory Database**: Persists all pipeline stages with thread-safe access
+- **Trace IDs**: Each news batch processing run gets a unique trace ID (e.g., `news-batch-20260504-070551`)
+- **Full Lineage**: Links NewsEvent → EventVector → VolShock → VolSurface → GreeksSnapshot
+- **API Integration**: All audit data retrievable via REST endpoints
+
+**Pipeline Trace Flow:**
+
+```
+NewsEvent → EventVector → VolShock → VolSurface → GreeksSnapshot
+     │            │            │            │              │
+     ▼            ▼            ▼            ▼              ▼
+┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐
+│ news_   │ │ event_   │ │ vol_     │ │ vol_      │ │ greeks_  │
+│ events  │ │ vectors  │ │ shocks   │ │ surfaces  │ │ snapshots│
+└─────────┘ └──────────┘ └──────────┘ └───────────┘ └──────────┘
+     │            │            │            │              │
+     └────────────┴─────────────┴────────────┴──────────────┘
+                          trace_id
+```
+
+**Audit API Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/audit/trace/{trace_id}` | Get full trace with all pipeline stages |
+| GET | `/api/audit/traces` | List recent traces |
+| POST | `/api/audit/trace/{trace_id}/end` | Mark trace as completed |
+
+**Example: Retrieve Trace**
+
+```bash
+# Get full pipeline trace
+curl "http://localhost:8000/api/audit/trace/news-batch-20260504-070551"
+
+# Response includes:
+# - trace: {trace_id, created_at, status, completed_at}
+# - news_events: [{headline, source, url, published_at}]
+# - event_vectors: [{event_type, sentiment, sentiment_score, importance}]
+# - vol_shocks: [{delta_1W_ATM, delta_1M_ATM, ...}]
+# - vol_surfaces: [{tenors, strikes, volatilities}]
+# - greeks_snapshots: [{delta, gamma, vega, theta, rho}]
+```
+
+**Trace ID in UI:**
+
+The system automatically includes `X-Trace-ID` in response headers for every API request. When fetching news impact, the trace ID is displayed in the UI allowing users to look up the full pipeline execution.
+
+**Trace ID Display in News Impact Panel:**
+
+When viewing news with impact, each news item shows its associated `trace_id` at the bottom of the news card. Clicking the trace ID opens the full audit trail for that specific news-to-Greeks execution.
+
+```javascript
+// The UI displays trace ID for each news impact
+<div class="news-trace-id">
+    Trace: <a href="/api/audit/trace/{trace_id}" target="_blank">{trace_id}</a>
+</div>
 ```
 
 ### Risk Engine Modes

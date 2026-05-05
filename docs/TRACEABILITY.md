@@ -68,6 +68,19 @@ This document maps system requirements to implementation components and test cas
 | AL-002 | Alert with exceeded value | `RiskAlert.exceeded_by` | `test_schemas.py` | `test_valid_risk_alert` |
 | AL-003 | Action recommendations | `RiskAlert.action_recommended` | `test_schemas.py` | `test_valid_risk_alert` |
 
+### Module 7: Audit Service (SQLite In-Memory)
+
+| Requirement ID | Requirement Description | Component | Test File | Test Cases |
+|----------------|------------------------|-----------|-----------|------------|
+| AU-001 | SQLite in-memory persistence | `AuditService` | `test_audit_service.py` | `test_audit_service_init`, `test_trace_lifecycle` |
+| AU-002 | News event persistence | `persist_news_event()` | `test_audit_service.py` | `test_persist_news_event` |
+| AU-003 | Event vector persistence | `persist_event_vector()` | `test_audit_service.py` | `test_persist_event_vector` |
+| AU-004 | Vol shock persistence | `persist_vol_shock()` | `test_audit_service.py` | `test_persist_vol_shock` |
+| AU-005 | Vol surface persistence | `persist_vol_surface()` | `test_audit_service.py` | `test_persist_vol_surface` |
+| AU-006 | Greeks snapshot persistence | `persist_greeks()` | `test_audit_service.py` | `test_persist_greeks` |
+| AU-007 | Full trace retrieval | `get_trace()` | `test_audit_service.py` | `test_get_trace` |
+| AU-008 | Thread-safe connections | `_get_connection()` | `test_audit_service.py` | `test_concurrent_access` |
+
 ### API Server (api.py)
 
 | Requirement ID | Requirement Description | Endpoint | Test Coverage |
@@ -85,6 +98,9 @@ This document maps system requirements to implementation components and test cas
 | API-011 | WebSocket real-time updates | `WS /ws/greeks` | Manual testing |
 | API-012 | Serve web UI | `GET /` | Manual testing |
 | API-013 | News impact analysis | `GET /api/news-impact` | Manual testing |
+| API-014 | Audit trace retrieval | `GET /api/audit/trace/{trace_id}` | Manual testing |
+| API-015 | List recent traces | `GET /api/audit/traces` | Manual testing |
+| API-016 | End trace | `POST /api/audit/trace/{trace_id}/end` | Manual testing |
 
 ### Data Schemas
 
@@ -133,7 +149,22 @@ API Server (FastAPI):
     GET /api/portfolios → NNRiskEngine.compute_portfolio_greeks → PortfolioGreeks
     GET /api/portfolios/{id}/time-ladder → NNRiskEngine.compute_portfolio_greeks (bucketed) → TimeLadder
     WS /ws/greeks → NNRiskEngine.compute_portfolio_greeks → Real-time tick
+    GET /api/news-with-impact → News → NLP → VolShock → Greeks (with audit persistence)
+    GET /api/audit/trace/{trace_id} → Full pipeline trace from SQLite
 ```
+
+### Audit Persistence (SQLite In-Memory)
+
+The audit service persists the full news-to-Greeks pipeline using SQLite in-memory database:
+
+| Table | Purpose | Link Key |
+|-------|---------|----------|
+| `traces` | Trace metadata | `trace_id` |
+| `news_events` | Raw news headlines | `trace_id` |
+| `event_vectors` | NLP output | `trace_id`, `event_id` |
+| `vol_shocks` | Vol predictions | `trace_id`, `event_id` |
+| `vol_surfaces` | Shocked surfaces | `trace_id`, `shock_id` |
+| `greeks_snapshots` | Final Greeks | `trace_id`, `vol_surface_snapshot_id` |
 
 ---
 

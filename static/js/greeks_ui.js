@@ -653,6 +653,9 @@ async function loadNewsWithImpact() {
         currentImpactData = data;
         currentHeadlines = data.news_impacts || [];
         
+        // Store trace ID for the batch
+        const batchTraceId = data.trace_id;
+        
         // Show baseline
         document.getElementById('baselineVega').textContent = formatNumber(data.baseline_greeks.vega, 2);
         
@@ -888,6 +891,18 @@ function updateNewsImpactList(impacts) {
     if (totalImpactEl) {
         totalImpactEl.textContent = formatNumber(totalImpact, 0);
         totalImpactEl.className = 'metric-value ' + (totalImpact > 0 ? 'positive' : '');
+    }
+    
+    // Show trace ID if available
+    const traceIdEl = document.getElementById('currentTraceId');
+    if (traceIdEl && currentImpactData && currentImpactData.trace_id) {
+        traceIdEl.textContent = currentImpactData.trace_id;
+        traceIdEl.title = 'Click to view full audit trail';
+        traceIdEl.onclick = () => {
+            window.open(`/api/audit/trace/${currentImpactData.trace_id}`, '_blank');
+        };
+        traceIdEl.style.cursor = 'pointer';
+        traceIdEl.style.display = 'inline';
     }
     
     // Update gauges with total impact

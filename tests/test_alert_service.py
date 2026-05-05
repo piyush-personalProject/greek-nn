@@ -41,9 +41,11 @@ class TestAlertService:
 
     def test_check_spot_rate_alert_above_threshold(self, alert_service):
         """Test alert triggered when change exceeds threshold."""
+        # For 0.5% threshold, need at least 0.5% change
+        # baseline=1.0850 -> current=1.0906 gives 0.5% change
         alert = alert_service.check_spot_rate_alert(
             pair="EURUSD",
-            current_rate=1.0900,  # ~0.46% change - above 0.5%
+            current_rate=1.0906,  # ~0.52% change - above 0.5%
             baseline_rate=1.0850
         )
         
@@ -66,10 +68,10 @@ class TestAlertService:
 
     def test_check_spot_rate_alert_cooldown(self, alert_service):
         """Test alert is suppressed during cooldown period."""
-        # First alert should trigger
+        # First alert should trigger (needs >= 0.5% change for threshold=0.5)
         alert1 = alert_service.check_spot_rate_alert(
             pair="EURUSD",
-            current_rate=1.0900,
+            current_rate=1.0906,  # ~0.52% change
             baseline_rate=1.0850
         )
         assert alert1 is not None
@@ -77,7 +79,7 @@ class TestAlertService:
         # Second alert for same pair should be suppressed (cooldown)
         alert2 = alert_service.check_spot_rate_alert(
             pair="EURUSD",
-            current_rate=1.0950,
+            current_rate=1.0962,  # Still same pair, cooldown applies
             baseline_rate=1.0850
         )
         assert alert2 is None
@@ -86,7 +88,7 @@ class TestAlertService:
         alert3 = alert_service.check_spot_rate_alert(
             pair="USDJPY",
             current_rate=150.50,
-            baseline_rate=149.00
+            baseline_rate=149.00  # ~1% change
         )
         assert alert3 is not None
 
@@ -117,9 +119,9 @@ class TestAlertService:
 
     def test_get_spot_alerts(self, alert_service):
         """Test retrieving spot alerts."""
-        # Create some alerts
-        alert_service.check_spot_rate_alert("EURUSD", 1.0900, 1.0850)
-        alert_service.check_spot_rate_alert("USDJPY", 150.50, 149.50)
+        # Create some alerts - both need >= 0.5% change for threshold=0.5
+        alert_service.check_spot_rate_alert("EURUSD", 1.0906, 1.0850)  # ~0.52% change
+        alert_service.check_spot_rate_alert("USDJPY", 150.50, 149.50)  # ~0.67% change
         
         alerts = alert_service.get_spot_alerts()
         assert len(alerts) == 2
@@ -131,8 +133,8 @@ class TestAlertService:
 
     def test_get_spot_alerts_with_time_filter(self, alert_service):
         """Test filtering alerts by time."""
-        # Create an alert
-        alert_service.check_spot_rate_alert("EURUSD", 1.0900, 1.0850)
+        # Create an alert - need >= 0.5% change for threshold=0.5
+        alert_service.check_spot_rate_alert("EURUSD", 1.0906, 1.0850)  # ~0.52% change
         
         # Get alerts since now (should include it)
         alerts = alert_service.get_spot_alerts(since=datetime.now() - timedelta(minutes=5))
@@ -160,7 +162,7 @@ class TestAlertService:
 
     def test_get_all_alerts(self, alert_service):
         """Test getting all alerts combined."""
-        alert_service.check_spot_rate_alert("EURUSD", 1.0900, 1.0850)
+        alert_service.check_spot_rate_alert("EURUSD", 1.0906, 1.0850)  # ~0.52% change
         alert_service.check_greek_alert("vega", 120000, 100000)
         
         result = alert_service.get_all_alerts()
@@ -173,8 +175,8 @@ class TestAlertService:
 
     def test_clear_old_alerts(self, alert_service):
         """Test clearing old alerts."""
-        # Create an alert (should have current timestamp)
-        alert_service.check_spot_rate_alert("EURUSD", 1.0900, 1.0850)
+        # Create an alert (should have current timestamp) - need >= 0.5% change
+        alert_service.check_spot_rate_alert("EURUSD", 1.0906, 1.0850)  # ~0.52% change
         
         # Clear with 24 hour threshold (should not remove recent alert)
         cleared = alert_service.clear_old_alerts(older_than_hours=24)
@@ -188,7 +190,7 @@ class TestAlertService:
 
     def test_get_status(self, alert_service):
         """Test status reporting."""
-        alert_service.check_spot_rate_alert("EURUSD", 1.0900, 1.0850)
+        alert_service.check_spot_rate_alert("EURUSD", 1.0906, 1.0850)  # ~0.52% change
         
         status = alert_service.get_status()
         
@@ -220,9 +222,10 @@ class TestAlertServiceRateLimiting:
             max_alerts_per_hour=3
         )
         
-        # Create 3 alerts (at limit)
+        # Create 3 alerts (at limit) - each change must be >= 0.5%
+        # For threshold 0.5%, need current-baseline >= 0.005 * baseline
         for i in range(3):
-            service.check_spot_rate_alert("PAIR1", 1.0 + i*0.01, 1.0)
+            service.check_spot_rate_alert("PAIR1", 1.0 + (i+1)*0.006, 1.0)
         
         assert len(service._spot_alerts) == 3
         
