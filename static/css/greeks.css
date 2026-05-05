@@ -93,6 +93,11 @@ body {
     background-color: var(--accent-red);
 }
 
+.status-dot.polling {
+    background-color: var(--accent-yellow);
+    animation: pulse 1s infinite;
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }

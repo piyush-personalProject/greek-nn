@@ -368,3 +368,186 @@ class TestNLPEngineHealthCheck:
         health = engine.health_check()
         
         assert health["redis"] == "connected"
+
+
+class TestNLPEngineAffectedPairs:
+    """Tests for get_affected_pairs functionality."""
+    
+    def test_affected_pairs_direct_currency_usd(self):
+        """Test direct USD mention maps to correct pairs."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-1",
+            headline="USD strengthens against major currencies",
+            event_type=EventType.MACRO,
+            sentiment=Sentiment.NEUTRAL,
+            sentiment_score=0.0,
+            importance=0.5,
+            surprise_factor=0.1,
+            entities={"central_banks": [], "currencies": ["USD"], "indicators": []},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        assert "EURUSD" in pairs
+        assert "GBPUSD" in pairs
+        assert "AUDUSD" in pairs
+        assert "USDCAD" in pairs
+        assert "NZDUSD" in pairs
+    
+    def test_affected_pairs_direct_currency_eur(self):
+        """Test direct EUR mention maps to EURUSD."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-2",
+            headline="EUR rallies on ECB decision",
+            event_type=EventType.CENTRAL_BANK,
+            sentiment=Sentiment.POSITIVE,
+            sentiment_score=0.5,
+            importance=0.7,
+            surprise_factor=0.3,
+            entities={"central_banks": [], "currencies": ["EUR"], "indicators": []},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        assert "EURUSD" in pairs
+    
+    def test_affected_pairs_central_bank_fed(self):
+        """Test Fed mention maps to USD pairs."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-3",
+            headline="Fed signals rate cuts",
+            event_type=EventType.CENTRAL_BANK,
+            sentiment=Sentiment.POSITIVE,
+            sentiment_score=0.3,
+            importance=0.8,
+            surprise_factor=0.2,
+            entities={"central_banks": ["Federal Reserve"], "currencies": [], "indicators": []},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        assert "EURUSD" in pairs
+        assert "GBPUSD" in pairs
+        assert "AUDUSD" in pairs
+    
+    def test_affected_pairs_interest_rate_event(self):
+        """Test interest rate event affects multiple pairs."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-4",
+            headline="Fed raises interest rates by 25 bps",
+            event_type=EventType.INTEREST_RATE,
+            sentiment=Sentiment.NEGATIVE,
+            sentiment_score=-0.2,
+            importance=0.9,
+            surprise_factor=0.5,
+            entities={"central_banks": ["Federal Reserve"], "currencies": [], "indicators": ["Interest Rates"]},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        # Interest rate events should affect multiple USD pairs
+        assert len(pairs) >= 2
+    
+    def test_affected_pairs_inflation_us(self):
+        """Test US inflation affects multiple pairs."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-5",
+            headline="US CPI rises more than expected",
+            event_type=EventType.INFLATION,
+            sentiment=Sentiment.NEGATIVE,
+            sentiment_score=-0.3,
+            importance=0.8,
+            surprise_factor=0.4,
+            entities={"central_banks": [], "currencies": ["USD"], "indicators": ["CPI"]},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        assert len(pairs) >= 2
+    
+    def test_affected_pairs_nfp_employment(self):
+        """Test NFP employment data affects USD pairs."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-6",
+            headline="NFP beats expectations with 250k jobs added",
+            event_type=EventType.EMPLOYMENT,
+            sentiment=Sentiment.POSITIVE,
+            sentiment_score=0.4,
+            importance=0.85,
+            surprise_factor=0.5,
+            entities={"central_banks": [], "currencies": [], "indicators": ["Employment"]},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        # NFP should affect multiple USD pairs
+        assert len(pairs) >= 2
+    
+    def test_affected_pairs_global_macro_fallback(self):
+        """Test global events fallback to major pairs."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-7",
+            headline="Global trade tensions ease",
+            event_type=EventType.MACRO,
+            sentiment=Sentiment.POSITIVE,
+            sentiment_score=0.3,
+            importance=0.6,
+            surprise_factor=0.2,
+            entities={"central_banks": [], "currencies": [], "indicators": []},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        # Should return default major pairs
+        assert "EURUSD" in pairs
+        assert "GBPUSD" in pairs
+        assert "USDJPY" in pairs
+    
+    def test_affected_pairs_jpy_boj(self):
+        """Test BOJ/JPY affects USDJPY pair."""
+        engine = NLPEngine()
+        
+        event = EventVector(
+            event_id="test-8",
+            headline="Bank of Japan maintains ultra-low rates",
+            event_type=EventType.CENTRAL_BANK,
+            sentiment=Sentiment.NEUTRAL,
+            sentiment_score=0.0,
+            importance=0.7,
+            surprise_factor=0.3,
+            entities={"central_banks": ["Bank of Japan"], "currencies": [], "indicators": []},
+            processed_at=datetime.now(),
+            source="Test"
+        )
+        
+        pairs = engine.get_affected_pairs(event)
+        
+        assert "USDJPY" in pairs

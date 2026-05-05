@@ -2,6 +2,8 @@
 
 // Global state
 let ws = null;
+let wsFailed = false;
+let greeksPollInterval = null;
 let currentPortfolio = 'FX-PORTFOLIO-01';
 let ladderChart = null;
 let impactChart = null;
@@ -25,6 +27,7 @@ const NEWS_POLL_INTERVAL = 60000; // 60 seconds
 const SPOT_RATES_POLL_INTERVAL = 30000; // 30 seconds for live spot rates
 const ALERTS_POLL_INTERVAL = 15000; // 15 seconds for alerts (faster polling to catch spot rate alerts)
 const IMPACT_POLL_INTERVAL = 120000; // 120 seconds (longer since it's heavier)
+const GREEKS_POLL_INTERVAL = 5000; // 5 seconds for Greeks polling (WebSocket fallback)
 
 // ==================== Initialization ====================
 
@@ -82,8 +85,13 @@ function initializeWebSocket() {
     
     ws.onclose = () => {
         updateConnectionStatus(false);
-        console.log('WebSocket disconnected. Reconnecting in 3s...');
-        setTimeout(initializeWebSocket, 3000);
+        console.log('WebSocket disconnected. Starting REST polling fallback...');
+        wsFailed = true;
+        startGreeksPolling();
+        // Stop reconnecting attempts after first failure to avoid endless loops
+        if (wsFailed) {
+            console.log('WebSocket failed, using REST polling instead');
+        }
     };
     
     ws.onerror = (error) => {
@@ -102,13 +110,17 @@ function updateConnectionStatus(connected) {
     const text = statusEl.querySelector('.status-text');
     
     if (connected) {
-        dot.classList.remove('disconnected');
+        dot.classList.remove('disconnected', 'polling');
         dot.classList.add('connected');
         text.textContent = 'Connected';
     } else {
         dot.classList.remove('connected');
-        dot.classList.add('disconnected');
-        text.textContent = 'Disconnected';
+        // Don't add 'disconnected' class if we're in polling mode
+        if (!wsFailed) {
+            dot.classList.add('disconnected');
+            text.textContent = 'Disconnected';
+        }
+        // else leave current status (will be updated to 'Polling' by startGreeksPolling)
     }
 }
 
@@ -251,6 +263,32 @@ async function loadGreeks() {
         }
     } catch (error) {
         console.error('Failed to load Greeks:', error);
+    }
+}
+
+// ==================== Greeks REST Polling (WebSocket Fallback) ====================
+
+function startGreeksPolling() {
+    console.log('Starting Greeks REST polling fallback...');
+    
+    // Initial fetch
+    loadGreeks();
+    
+    // Set up polling interval
+    greeksPollInterval = setInterval(() => {
+        loadGreeks();
+    }, GREEKS_POLL_INTERVAL);
+    
+    // Update status to show polling mode
+    const statusEl = document.getElementById('wsStatus');
+    if (statusEl) {
+        const dot = statusEl.querySelector('.status-dot');
+        const text = statusEl.querySelector('.status-text');
+        if (dot) {
+            dot.classList.remove('disconnected');
+            dot.classList.add('polling');
+        }
+        if (text) text.textContent = 'Polling';
     }
 }
 

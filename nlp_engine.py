@@ -387,6 +387,122 @@ class NLPEngine:
         
         return entities
     
+    # Supported currency pairs in the system
+    SUPPORTED_PAIRS = [
+        "EURUSD", "USDJPY", "GBPUSD", "USDCHF",
+        "AUDUSD", "USDCAD", "NZDUSD"
+    ]
+    
+    # Mapping from currency to which pairs contain that currency
+    CURRENCY_TO_PAIRS = {
+        "USD": ["EURUSD", "GBPUSD", "AUDUSD", "USDCAD", "NZDUSD"],
+        "EUR": ["EURUSD"],
+        "JPY": ["USDJPY"],
+        "GBP": ["GBPUSD"],
+        "CHF": ["USDCHF"],
+        "AUD": ["AUDUSD"],
+        "CAD": ["USDCAD"],
+        "NZD": ["NZDUSD"]
+    }
+    
+    # Mapping from central bank to its currency
+    CENTRAL_BANK_TO_CURRENCY = {
+        "Federal Reserve": "USD",
+        "ECB": "EUR",
+        "Bank of Japan": "JPY",
+        "Bank of England": "GBP",
+        "MAS": "SGD",  # Not in supported pairs but included for completeness
+        "RBI": "INR"    # Not in supported pairs but included for completeness
+    }
+    
+    def get_affected_pairs(self, event_vector: EventVector) -> List[str]:
+        """
+        Determine which currency pairs are affected by a news event.
+        
+        Uses a multi-step inference process:
+        1. Direct currency mentions → map to pairs containing those currencies
+        2. Central bank mentions → map to currency of that central bank
+        3. Event type inference → boost relevance for specific pairs
+        4. Default to all pairs if no specific entities found (global macro event)
+        
+        Args:
+            event_vector: Processed event from NLP engine
+            
+        Returns:
+            List of affected currency pair codes (e.g., ["EURUSD", "GBPUSD"])
+        """
+        affected_pairs: set = set()
+        entities = event_vector.entities
+        
+        # Step 1: Direct currency mentions
+        currencies = entities.get("currencies", [])
+        for currency in currencies:
+            if currency in self.CURRENCY_TO_PAIRS:
+                for pair in self.CURRENCY_TO_PAIRS[currency]:
+                    affected_pairs.add(pair)
+        
+        # Step 2: Central bank mentions
+        central_banks = entities.get("central_banks", [])
+        for bank in central_banks:
+            if bank in self.CENTRAL_BANK_TO_CURRENCY:
+                currency = self.CENTRAL_BANK_TO_CURRENCY[bank]
+                if currency in self.CURRENCY_TO_PAIRS:
+                    for pair in self.CURRENCY_TO_PAIRS[currency]:
+                        affected_pairs.add(pair)
+        
+        # Step 3: Event type inference
+        # Certain event types have specific currency implications
+        event_type = event_vector.event_type
+        headline_lower = event_vector.headline.lower()
+        
+        if event_type == EventType.INTEREST_RATE or event_type == EventType.CENTRAL_BANK:
+            # Interest rate decisions primarily affect the issuing currency
+            for bank in central_banks:
+                if bank == "Federal Reserve" or bank == "Fed":
+                    affected_pairs.update(["EURUSD", "GBPUSD", "AUDUSD", "USDCAD", "NZDUSD"])
+                elif bank == "ECB":
+                    affected_pairs.add("EURUSD")
+                elif bank == "Bank of Japan":
+                    affected_pairs.add("USDJPY")
+                elif bank == "Bank of England":
+                    affected_pairs.add("GBPUSD")
+        
+        elif event_type == EventType.INFLATION:
+            # Inflation affects currencies with active central banks fighting inflation
+            if any(term in headline_lower for term in ["us inflation", "us cpi", "america inflation"]):
+                affected_pairs.update(["EURUSD", "GBPUSD", "AUDUSD", "USDCAD", "NZDUSD"])
+            elif any(term in headline_lower for term in ["euro zone inflation", "eu inflation", "ecb"]):
+                affected_pairs.add("EURUSD")
+        
+        elif event_type == EventType.EMPLOYMENT:
+            # Employment data (NFP) primarily impacts USD
+            if any(term in headline_lower for term in ["nfp", "non-farm", "us jobs", "us employment"]):
+                affected_pairs.update(["EURUSD", "GBPUSD", "AUDUSD", "USDCAD", "NZDUSD"])
+        
+        elif event_type == EventType.MACRO:
+            # GDP and macro data affects the reported currency
+            gdp_terms = ["gdp", "growth", "economic activity"]
+            if any(term in headline_lower for term in gdp_terms):
+                # If US macro mentioned
+                if any(term in headline_lower for term in ["us", "united states", "america", "us economy"]):
+                    affected_pairs.update(["EURUSD", "GBPUSD", "AUDUSD", "USDCAD", "NZDUSD"])
+                # If EU macro mentioned
+                elif any(term in headline_lower for term in ["euro", "eu", "europe"]):
+                    affected_pairs.add("EURUSD")
+        
+        # Step 4: Fallback - if no specific pairs identified, apply to all
+        # This handles global macro events that affect all markets
+        if not affected_pairs:
+            # Check for truly global events
+            global_terms = ["global", "world economy", "trade war", "commodities"]
+            if any(term in headline_lower for term in global_terms):
+                affected_pairs.update(self.SUPPORTED_PAIRS)
+            else:
+                # Default: apply to major pairs
+                affected_pairs.update(["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"])
+        
+        return list(affected_pairs)
+    
     def _calculate_importance(self, event: NewsEvent, sentiment_score: float) -> float:
         """
         Calculate importance score (0-1) based on multiple factors.
