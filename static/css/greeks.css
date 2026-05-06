@@ -944,6 +944,28 @@ body {
     border-radius: 4px;
 }
 
+.affected-pairs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.pairs-label {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.pair-badge {
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: var(--accent-cyan);
+    background-color: var(--bg-secondary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--accent-cyan);
+}
+
 .news-impact-item .news-link {
     font-size: 11px;
     color: var(--accent-blue);

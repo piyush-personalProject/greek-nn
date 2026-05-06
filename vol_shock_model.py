@@ -131,12 +131,24 @@ class VolShockModel:
     - ATM deltas for: 1W, 1M, 3M, 6M, 1Y
     - 25-delta Risk Reversal (RR) for 1M
     - 25-delta Butterfly (BF) for 1M
+    
+    Usage:
+        from nlp_engine import NLPEngine
+        from vol_shock_model import VolShockModel
+        
+        nlp_engine = NLPEngine()
+        vol_model = VolShockModel(nlp_engine=nlp_engine)
+        
+        event_vector = nlp_engine.process_news_event(news_event)
+        shock = vol_model.predict_shock(event_vector)
+        # shock.affected_pairs contains relevant currency pairs
     """
     
     def __init__(
         self,
         model_path: Optional[str] = None,
-        device: str = "cpu"
+        device: str = "cpu",
+        nlp_engine: Optional[Any] = None
     ):
         """
         Initialize Vol Shock Model.
@@ -144,10 +156,12 @@ class VolShockModel:
         Args:
             model_path: Path to ONNX model file
             device: Device for inference ('cpu', 'cuda')
+            nlp_engine: Optional NLPEngine instance for computing affected pairs
         """
         self.logger = get_logger(self.__class__.__name__)
         self.model_path = model_path or config.ml.vol_model_path
         self.device = device
+        self.nlp_engine = nlp_engine
         
         # Model instances
         self.onnx_session: Optional[ort.InferenceSession] = None
@@ -270,9 +284,17 @@ class VolShockModel:
                 deltas = self._predict_rulebased(event_vector)
             
             # Create VolShock
+            affected_pairs = []
+            if self.nlp_engine:
+                try:
+                    affected_pairs = self.nlp_engine.get_affected_pairs(event_vector)
+                except Exception as e:
+                    self.logger.warning(f"Failed to get affected pairs: {e}")
+            
             vol_shock = VolShock(
                 shock_id=shock_id,
                 event_vector=event_vector,
+                affected_pairs=affected_pairs,
                 delta_1W_ATM=deltas[0],
                 delta_1M_ATM=deltas[1],
                 delta_3M_ATM=deltas[2],

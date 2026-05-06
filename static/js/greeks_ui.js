@@ -1024,6 +1024,12 @@ function updateNewsImpactList(impacts) {
                     <span class="vol-shock-item">1M: ${item.vol_shocks['1M_ATM'] || 0}</span>
                     <span class="vol-shock-item">3M: ${item.vol_shocks['3M_ATM'] || 0}</span>
                 </div>
+                ${item.affected_pairs && item.affected_pairs.length > 0 ? `
+                <div class="affected-pairs">
+                    <span class="pairs-label">Affected Pairs:</span>
+                    ${item.affected_pairs.map(pair => `<span class="pair-badge">${pair}</span>`).join('')}
+                </div>
+                ` : ''}
             </div>
             ${item.url ? `<a href="${item.url}" target="_blank" class="news-link">Read more →</a>` : ''}
         `;

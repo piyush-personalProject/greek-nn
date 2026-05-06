@@ -65,6 +65,7 @@ class VolShock(BaseModel):
     """Volatility shock from shock model."""
     shock_id: str
     event_vector: EventVector
+    affected_pairs: List[str] = Field(default_factory=list, description="Currency pairs affected by this shock")
     delta_1W_ATM: float
     delta_1M_ATM: float
     delta_3M_ATM: float

@@ -154,7 +154,8 @@ async def startup_event():
     if config.enable_vol_shock:
         vol_shock_model = VolShockModel(
             model_path=config.ml.vol_model_path,
-            device="cpu"
+            device="cpu",
+            nlp_engine=nlp_engine
         )
         logger.info(f"Vol Shock Model initialized in {vol_shock_model.model_mode} mode")
     
@@ -541,7 +542,7 @@ async def compute_impacted_greeks(
             raise HTTPException(status_code=503, detail="Vol surface service not available")
         
         if vol_shock_model is None:
-            vol_shock_model = VolShockModel()
+            vol_shock_model = VolShockModel(nlp_engine=nlp_engine)
         
         portfolio = _portfolios[portfolio_id]
         base_vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
@@ -1263,7 +1264,7 @@ async def get_news_with_impact(max_results: int = 10):
             raise HTTPException(status_code=503, detail="NLP engine not available")
         
         if vol_shock_model is None:
-            vol_shock_model = VolShockModel()
+            vol_shock_model = VolShockModel(nlp_engine=nlp_engine)
         
         if risk_engine is None:
             raise HTTPException(status_code=503, detail="Risk engine not available")
@@ -1350,6 +1351,7 @@ async def get_news_with_impact(max_results: int = 10):
                     "sentiment": event_vector.sentiment.value,
                     "sentiment_score": round(event_vector.sentiment_score, 3),
                     "importance": round(event_vector.importance, 3),
+                    "affected_pairs": vol_shock.affected_pairs,
                     "greeks_impact": {
                         "delta": round(delta_delta, 2),
                         "gamma": round(delta_gamma, 4),
@@ -1365,6 +1367,17 @@ async def get_news_with_impact(max_results: int = 10):
                         "1Y_ATM": round(vol_shock.delta_1Y_ATM, 5)
                     }
                 })
+            
+            # Sort news by category and sentiment score, unknown last
+            def sort_key(item):
+                event_type = item["event_type"]
+                sentiment_score = item["sentiment_score"]
+                # Unknown category gets highest sort value (last)
+                unknown_sort = 0 if event_type != "unknown" else 1000
+                # Sort by category first, then by sentiment score (descending)
+                return (unknown_sort, event_type, -sentiment_score)
+            
+            impact_results = sorted(impact_results, key=sort_key)
             
             span.log(f"Processed {len(impact_results)} news with impact in single call")
             
@@ -1399,7 +1412,7 @@ async def get_news_impact(max_results: int = 10):
             raise HTTPException(status_code=503, detail="NLP engine not available")
         
         if vol_shock_model is None:
-            vol_shock_model = VolShockModel()
+            vol_shock_model = VolShockModel(nlp_engine=nlp_engine)
         
         if risk_engine is None:
             raise HTTPException(status_code=503, detail="Risk engine not available")
@@ -1485,6 +1498,7 @@ async def get_news_impact(max_results: int = 10):
                     "sentiment": event_vector.sentiment.value,
                     "sentiment_score": round(event_vector.sentiment_score, 3),
                     "importance": round(event_vector.importance, 3),
+                    "affected_pairs": vol_shock.affected_pairs,
                     "greeks_impact": {
                         "delta": round(delta_delta, 2),
                         "gamma": round(delta_gamma, 4),
@@ -1500,6 +1514,17 @@ async def get_news_impact(max_results: int = 10):
                         "1Y_ATM": round(vol_shock.delta_1Y_ATM, 5)
                     }
                 })
+            
+            # Sort news by category and sentiment score, unknown last
+            def sort_key(item):
+                event_type = item["event_type"]
+                sentiment_score = item["sentiment_score"]
+                # Unknown category gets highest sort value (last)
+                unknown_sort = 0 if event_type != "unknown" else 1000
+                # Sort by category first, then by sentiment score (descending)
+                return (unknown_sort, event_type, -sentiment_score)
+            
+            impact_results = sorted(impact_results, key=sort_key)
             
             span.log(f"Processed {len(impact_results)} news for impact analysis")
             
