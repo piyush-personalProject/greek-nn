@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import asyncio
 import json
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1247,10 +1247,18 @@ async def get_news(keyword: Optional[str] = None, max_results: int = 20):
 
 
 @app.get("/api/news-with-impact")
-async def get_news_with_impact(max_results: int = 10):
+async def get_news_with_impact(
+    max_results: int = 10,
+    min_sentiment_score: float = Query(0.3, description="Minimum absolute sentiment score to include (0-1)")
+):
     """
     Get news headlines WITH their Greeks impact - single call to avoid duplicate fetching.
     Combines /api/news and /api/news-impact functionality.
+    
+    Args:
+        max_results: Maximum number of headlines to process
+        min_sentiment_score: Minimum absolute sentiment score to include (default 0.3).
+                           Only news with |sentiment_score| >= this value will be included.
     """
     from logger import get_tracer
     
@@ -1368,32 +1376,171 @@ async def get_news_with_impact(max_results: int = 10):
                     }
                 })
             
-            # Sort news by category, sentiment (negative/positive/neutral), and sentiment score
-            def sort_key(item):
-                event_type = item["event_type"]
-                sentiment = item["sentiment"]
-                sentiment_score = item["sentiment_score"]
-                # Unknown category gets highest sort value (last)
-                unknown_sort = 0 if event_type != "unknown" else 1000
-                # Sentiment order: negative (0), positive (1), neutral (2)
-                sentiment_order = {"negative": 0, "positive": 1, "neutral": 2}.get(sentiment, 3)
-                # Sort by category first, then sentiment order, then by sentiment score (descending)
-                return (unknown_sort, event_type, sentiment_order, -sentiment_score)
+            # Sort news by sentiment score (descending - strongest sentiment first)
+            impact_results = sorted(impact_results, key=lambda x: x["sentiment_score"], reverse=True)
             
-            impact_results = sorted(impact_results, key=sort_key)
+            # Filter by minimum absolute sentiment score
+            original_count = len(impact_results)
+            impact_results = [r for r in impact_results if abs(r["sentiment_score"]) >= min_sentiment_score]
             
-            span.log(f"Processed {len(impact_results)} news with impact in single call")
+            span.log(f"Processed {original_count} news with impact, filtered to {len(impact_results)} with |sentiment_score| >= {min_sentiment_score}")
             
             return {
                 "timestamp": datetime.now().isoformat(),
                 "trace_id": trace_id,
                 "count": len(impact_results),
+                "total_processed": original_count,
+                "filter_applied": min_sentiment_score,
                 "baseline_greeks": baseline_greeks.total_greeks.to_dict(),
                 "news_impacts": impact_results
             }
         except Exception as e:
             span.log(f"Failed to compute news with impact: {e}", level=40)
             logger.error(f"Failed to compute news with impact: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/news/exclude")
+async def compute_greeks_with_excluded_news(
+    excluded_headlines: List[str] = Body(..., description="List of headlines to exclude from Greeks calculation"),
+    portfolio_id: str = Query("FX-PORTFOLIO-01", description="Portfolio ID")
+):
+    """
+    Compute Greeks after excluding specific news items.
+    
+    This endpoint allows removing news items from consideration and recalculating
+    the Greeks impact based only on the remaining news.
+    
+    Args:
+        excluded_headlines: List of headlines to exclude from calculation
+        portfolio_id: Portfolio to compute Greeks for
+    """
+    from logger import get_tracer
+    
+    with get_tracer().start_span("compute_greeks_exclude_news", excluded_count=len(excluded_headlines)) as span:
+        global vol_shock_model
+        
+        if news_service is None:
+            raise HTTPException(status_code=503, detail="News service not available")
+        
+        if nlp_engine is None:
+            raise HTTPException(status_code=503, detail="NLP engine not available")
+        
+        if vol_shock_model is None:
+            vol_shock_model = VolShockModel(nlp_engine=nlp_engine)
+        
+        if risk_engine is None:
+            raise HTTPException(status_code=503, detail="Risk engine not available")
+        
+        try:
+            portfolio = _portfolios.get(portfolio_id)
+            if not portfolio:
+                raise HTTPException(status_code=404, detail="Portfolio not found")
+            
+            baseline_surface = _current_vol_surface or create_mock_surface(datetime.now())
+            
+            # Get baseline Greeks (before any news)
+            baseline_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=baseline_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            # Fetch all headlines
+            all_headlines = await news_service.fetch_all_headlines()
+            all_headlines = sorted(all_headlines, key=lambda x: x.published_at, reverse=True)
+            
+            # Filter out excluded headlines
+            filtered_headlines = [h for h in all_headlines if h.headline not in excluded_headlines]
+            
+            span.log(f"Computing Greeks with {len(filtered_headlines)} news (excluded {len(excluded_headlines)})")
+            
+            # Initialize audit trace
+            trace_id = f"exclude-batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            audit = get_audit_service()
+            audit.begin_trace(trace_id)
+            
+            cumulative_greeks = Greeks(
+                delta=baseline_greeks.total_greeks.delta,
+                gamma=baseline_greeks.total_greeks.gamma,
+                vega=baseline_greeks.total_greeks.vega,
+                theta=baseline_greeks.total_greeks.theta,
+                rho=baseline_greeks.total_greeks.rho
+            )
+            cumulative_impacts = []
+            
+            for h in filtered_headlines:
+                # Process through NLP
+                event_vector = nlp_engine.process_news_event(h)
+                
+                # Predict vol shock
+                vol_shock = vol_shock_model.predict_shock(event_vector)
+                
+                # Get shocked surface
+                shocked_surface, _ = vol_surface_service.get_shocked_surface(baseline_surface, vol_shock)
+                
+                # Compute new Greeks
+                shocked_greeks = risk_engine.compute_portfolio_greeks(
+                    portfolio=portfolio,
+                    vol_surface=shocked_surface,
+                    spot_rates=_current_spot_rates,
+                    risk_free_rate=0.05
+                )
+                
+                # Track cumulative impact
+                delta_delta = shocked_greeks.total_greeks.delta - cumulative_greeks.delta
+                delta_gamma = shocked_greeks.total_greeks.gamma - cumulative_greeks.gamma
+                delta_vega = shocked_greeks.total_greeks.vega - cumulative_greeks.vega
+                delta_theta = shocked_greeks.total_greeks.theta - cumulative_greeks.theta
+                delta_rho = shocked_greeks.total_greeks.rho - cumulative_greeks.rho
+                
+                cumulative_greeks = shocked_greeks.total_greeks
+                
+                cumulative_impacts.append({
+                    "headline": h.headline,
+                    "source": h.source,
+                    "sentiment_score": round(event_vector.sentiment_score, 3),
+                    "event_type": event_vector.event_type.value,
+                    "greeks_impact": {
+                        "delta": round(delta_delta, 2),
+                        "gamma": round(delta_gamma, 4),
+                        "vega": round(delta_vega, 2),
+                        "theta": round(delta_theta, 2),
+                        "rho": round(delta_rho, 2)
+                    }
+                })
+            
+            # Sort by absolute sentiment score
+            cumulative_impacts = sorted(cumulative_impacts, key=lambda x: abs(x["sentiment_score"]), reverse=True)
+            
+            # Calculate deltas from baseline
+            final_delta = cumulative_greeks.delta - baseline_greeks.total_greeks.delta
+            final_gamma = cumulative_greeks.gamma - baseline_greeks.total_greeks.gamma
+            final_vega = cumulative_greeks.vega - baseline_greeks.total_greeks.vega
+            final_theta = cumulative_greeks.theta - baseline_greeks.total_greeks.theta
+            final_rho = cumulative_greeks.rho - baseline_greeks.total_greeks.rho
+            
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "trace_id": trace_id,
+                "portfolio_id": portfolio_id,
+                "excluded_count": len(excluded_headlines),
+                "included_count": len(filtered_headlines),
+                "baseline_greeks": baseline_greeks.total_greeks.to_dict(),
+                "current_greeks": cumulative_greeks.to_dict(),
+                "greeks_delta": {
+                    "delta": round(final_delta, 2),
+                    "gamma": round(final_gamma, 4),
+                    "vega": round(final_vega, 2),
+                    "theta": round(final_theta, 2),
+                    "rho": round(final_rho, 2)
+                },
+                "news_impacts": cumulative_impacts
+            }
+        except Exception as e:
+            span.log(f"Failed to compute Greeks with excluded news: {e}", level=40)
+            logger.error(f"Failed to compute Greeks with excluded news: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1518,19 +1665,8 @@ async def get_news_impact(max_results: int = 10):
                     }
                 })
             
-            # Sort news by category, sentiment (negative/positive/neutral), and sentiment score
-            def sort_key(item):
-                event_type = item["event_type"]
-                sentiment = item["sentiment"]
-                sentiment_score = item["sentiment_score"]
-                # Unknown category gets highest sort value (last)
-                unknown_sort = 0 if event_type != "unknown" else 1000
-                # Sentiment order: negative (0), positive (1), neutral (2)
-                sentiment_order = {"negative": 0, "positive": 1, "neutral": 2}.get(sentiment, 3)
-                # Sort by category first, then sentiment order, then by sentiment score (descending)
-                return (unknown_sort, event_type, sentiment_order, -sentiment_score)
-            
-            impact_results = sorted(impact_results, key=sort_key)
+            # Sort news by sentiment score (descending - strongest sentiment first)
+            impact_results = sorted(impact_results, key=lambda x: x["sentiment_score"], reverse=True)
             
             span.log(f"Processed {len(impact_results)} news for impact analysis")
             

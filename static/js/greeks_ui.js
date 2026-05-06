@@ -14,6 +14,7 @@ let currentGreeks = {
 };
 let currentHeadlines = [];
 let currentImpactData = null;
+let excludedHeadlines = [];  // Track excluded news headlines
 let currentSpotRates = {};
 let currentSpotChanges = [];
 let activeTab = 'news';
@@ -211,15 +212,16 @@ function initializeEventListeners() {
     if (mobileNavToggle) {
         mobileNavToggle.addEventListener('click', () => {
             mobileNavToggle.classList.toggle('active');
-            // Toggle panel visibility on mobile
-            document.querySelectorAll('.panel').forEach(panel => {
-                panel.classList.toggle('expanded');
-            });
+            // Toggle left panel visibility on mobile
+            const leftPanel = document.querySelector('.panel-left');
+            if (leftPanel) {
+                leftPanel.classList.toggle('expanded');
+            }
         });
     }
     
-    // Panel header click to expand/collapse on mobile
-    document.querySelectorAll('.panel-header').forEach(header => {
+    // Panel header click to expand/collapse on mobile - only for left panel
+    document.querySelectorAll('.panel-left .panel-header').forEach(header => {
         header.addEventListener('click', () => {
             if (window.innerWidth <= 768) {
                 const panel = header.closest('.panel');
@@ -927,7 +929,7 @@ function updateNewsImpactList(impacts) {
     container.innerHTML = '';
     
     if (!impacts || impacts.length === 0) {
-        container.innerHTML = '<div class="news-empty">No news impact data available</div>';
+        container.innerHTML = '<div class="news-empty">No news impact data available (filtered by sentiment score)</div>';
         // Update summary metrics
         const activeCountEl = document.getElementById('activeNewsCount');
         const totalImpactEl = document.getElementById('totalImpact');
@@ -993,6 +995,7 @@ function updateNewsImpactList(impacts) {
                 <span class="news-time">${publishedDate}</span>
                 <span class="event-type-badge ${eventTypeBadge}">${eventTypeBadge}</span>
                 <span class="sentiment-badge ${sentimentClass}">${item.sentiment || 'neutral'}</span>
+                <button class="remove-news-btn" onclick="removeNews('${item.headline.replace(/'/g, "\\'")}')" title="Remove this news">×</button>
             </div>
             <div class="news-headline">${item.headline || ''}</div>
             <div class="news-impact-details">
@@ -1445,4 +1448,96 @@ function getTenorLabel(tenor) {
     if (tenor <= 3/12) return '3M';
     if (tenor <= 6/12) return '6M';
     return '1Y';
+}
+
+// ==================== News Removal and Recomputation ====================
+
+function removeNews(headline) {
+    console.log('Removing news:', headline);
+    
+    // Add to excluded list
+    if (!excludedHeadlines.includes(headline)) {
+        excludedHeadlines.push(headline);
+        showAlert('info', 'News Removed', `Excluded: "${headline.substring(0, 50)}..."`);
+    }
+    
+    // Show reset button if we have excluded news
+    const resetBtn = document.getElementById('resetNewsBtn');
+    if (resetBtn && excludedHeadlines.length > 0) {
+        resetBtn.style.display = 'inline-block';
+    }
+    
+    // Recompute Greeks with this news excluded
+    recomputeGreeksWithExclusions();
+}
+
+async function recomputeGreeksWithExclusions() {
+    if (excludedHeadlines.length === 0) {
+        // No exclusions, just reload the news
+        loadNewsWithImpact();
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/news/exclude', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                excluded_headlines: excludedHeadlines,
+                portfolio_id: currentPortfolio
+            })
+        });
+        
+        if (!response.ok) {
+            console.error('Failed to recompute Greeks with exclusions');
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('Recomputed Greeks with exclusions:', data);
+        
+        // Update baseline display
+        document.getElementById('baselineVega').textContent = formatNumber(data.baseline_greeks.vega, 2);
+        
+        // Update current Greeks display
+        if (data.current_greeks) {
+            currentGreeks = data.current_greeks;
+            updateGreeksDisplay(data.current_greeks);
+        }
+        
+        // Update news list with remaining impacts
+        updateNewsImpactList(data.news_impacts);
+        
+        // Update total impact
+        const totalImpactEl = document.getElementById('totalImpact');
+        if (totalImpactEl && data.greeks_delta) {
+            const totalImpact = Math.abs(data.greeks_delta.vega) + Math.abs(data.greeks_delta.delta);
+            totalImpactEl.textContent = formatNumber(totalImpact, 0);
+            totalImpactEl.className = 'metric-value ' + (totalImpact > 0 ? 'positive' : '');
+        }
+        
+        // Show alert about updated Greeks
+        const deltaVega = data.greeks_delta?.vega || 0;
+        showAlert('success', 'Greeks Updated', `With ${data.included_count} news items: ΔVega = ${deltaVega > 0 ? '+' : ''}${formatNumber(deltaVega, 2)}`);
+        
+        // Update active news count
+        const activeCountEl = document.getElementById('activeNewsCount');
+        if (activeCountEl) activeCountEl.textContent = data.included_count || 0;
+        
+    } catch (error) {
+        console.error('Failed to recompute Greeks with exclusions:', error);
+        showAlert('error', 'Error', 'Failed to update Greeks after removing news');
+    }
+}
+
+function resetExcludedNews() {
+    if (excludedHeadlines.length === 0) return;
+    
+    excludedHeadlines = [];
+    showAlert('info', 'News Reset', 'All excluded news has been restored');
+    loadNewsWithImpact();
+    
+    // Hide reset button
+    const resetBtn = document.getElementById('resetNewsBtn');
+    if (resetBtn) resetBtn.style.display = 'none';
 }

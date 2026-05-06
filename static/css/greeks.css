@@ -837,6 +837,33 @@ body {
     margin-bottom: 12px;
 }
 
+/* Remove news button - always visible */
+.news-impact-item .remove-news-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(239, 68, 68, 0.4);
+    color: var(--accent-red);
+    border: 1px solid var(--accent-red);
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    font-size: 18px;
+    font-weight: bold;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    margin-left: auto;
+    opacity: 0.8;
+}
+
+.news-impact-item .remove-news-btn:hover {
+    background: var(--accent-red);
+    color: white;
+    opacity: 1;
+}
+
 .news-impact-item .news-source {
     font-size: 12px;
     font-weight: 600;
@@ -1099,6 +1126,10 @@ body {
     cursor: pointer;
     flex-direction: column;
     gap: 4px;
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    align-items: center;
 }
 
 .mobile-nav-toggle span {
@@ -1137,7 +1168,12 @@ body {
     }
     
     .panel.expanded {
-        max-height: 1000px;
+        max-height: 2000px;
+    }
+    
+    .panel-header {
+        cursor: pointer;
+        position: relative;
     }
     
     .panel-header::after {
@@ -1150,6 +1186,22 @@ body {
     
     .panel.expanded .panel-header::after {
         transform: rotate(180deg);
+    }
+    
+    /* Left panel hidden by default on mobile, toggle to show */
+    .panel-left {
+        max-height: 0;
+        position: absolute;
+        z-index: 100;
+        width: calc(100% - 32px);
+        left: 16px;
+        top: 60px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    
+    .panel-left.expanded {
+        max-height: 400px;
+        overflow-y: auto;
     }
 }
 
@@ -1248,9 +1300,17 @@ body {
         font-size: 13px;
     }
     
+    .dashboard {
+        height: auto;
+        min-height: 100vh;
+    }
+    
     /* Header Mobile */
     .header {
         padding: 10px 12px;
+        position: sticky;
+        top: 0;
+        z-index: 200;
     }
     
     .header-left {
@@ -1274,18 +1334,34 @@ body {
         justify-content: space-between;
     }
     
-    /* Main Content Mobile */
+    .connection-status {
+        padding: 6px 10px;
+    }
+    
+    /* Main Content Mobile - stack panels */
     .main-content {
         padding: 8px;
         gap: 8px;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    /* Panels - full width on mobile */
+    .panel-left,
+    .panel-center,
+    .panel-right {
+        width: 100%;
+        order: unset;
     }
     
     .panel {
         border-radius: 6px;
+        max-height: none;
     }
     
     .panel-header {
         padding: 10px 12px;
+        background-color: var(--bg-secondary);
     }
     
     .panel-header h2 {
@@ -1301,9 +1377,27 @@ body {
         margin-bottom: 8px;
     }
     
-    /* Spot Rates - Stack vertically on mobile */
+    /* Tab selector - scrollable on mobile */
+    .tab-selector {
+        overflow-x: auto;
+        gap: 4px;
+        padding-bottom: 4px;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .tab-btn {
+        white-space: nowrap;
+        padding: 8px 12px;
+    }
+    
+    /* Spot Rates - Single column on mobile */
     .spot-rates {
         grid-template-columns: 1fr;
+        gap: 4px;
+    }
+    
+    .spot-rate-item {
+        padding: 8px 10px;
     }
     
     /* Greeks Grid - Single column */
@@ -1312,7 +1406,7 @@ body {
     }
     
     .greek-item {
-        padding: 6px 10px;
+        padding: 8px 12px;
     }
     
     /* Chart Container - Full width */
@@ -1335,6 +1429,7 @@ body {
     .ladder-table-container {
         padding: 0 12px 12px;
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
     
     .ladder-table {
@@ -1344,17 +1439,28 @@ body {
     
     .ladder-table th,
     .ladder-table td {
-        padding: 8px 10px;
+        padding: 10px 12px;
     }
     
     /* Portfolio Select - Full width */
     .portfolio-select {
         width: 100%;
+        padding: 10px 32px 10px 12px;
+        min-height: 44px;
     }
     
     /* Greek Selector */
+    #ladderGreekSelector {
+        width: 100%;
+        justify-content: center;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
     #ladderGreekSelector select {
         width: 100%;
+        min-height: 44px;
+        padding: 10px 32px 10px 12px;
     }
     
     /* Positions - Better touch targets */
@@ -1363,8 +1469,8 @@ body {
     }
     
     .position-card {
-        padding: 10px;
-        margin-bottom: 6px;
+        padding: 12px;
+        margin-bottom: 8px;
     }
     
     .position-card .position-details {
@@ -1378,17 +1484,21 @@ body {
     
     /* Add Trade Button - Touch friendly */
     #addTradeBtn {
-        padding: 8px 14px;
-        font-size: 11px;
+        padding: 10px 16px;
+        font-size: 12px;
+        min-height: 44px;
+        width: 100%;
     }
     
     /* Impact Summary - Stack metrics */
     .impact-summary {
         padding: 12px;
+        flex-wrap: wrap;
     }
     
     .summary-metric {
         flex: 1 1 80px;
+        min-width: 70px;
     }
     
     .metric-value {
@@ -1398,10 +1508,13 @@ body {
     /* Impact Dashboard - Stack vertically */
     .impact-dashboard {
         padding: 12px;
+        flex-direction: column;
     }
     
     .impact-gauges {
-        gap: 12px;
+        width: 100%;
+        justify-content: space-around;
+        gap: 16px;
     }
     
     .gauge-wrapper canvas {
@@ -1416,6 +1529,10 @@ body {
     }
     
     /* Modal - Full screen on mobile */
+    .modal {
+        padding: 0;
+    }
+    
     .modal-content {
         width: 100%;
         max-width: 100%;
@@ -1426,18 +1543,32 @@ body {
     }
     
     .modal-header {
-        padding: 12px;
+        padding: 16px;
+        min-height: 60px;
     }
     
     .modal-body {
         flex: 1;
         overflow-y: auto;
-        padding: 12px;
+        padding: 16px;
     }
     
     .form-row {
         grid-template-columns: 1fr;
         gap: 12px;
+    }
+    
+    /* Form inputs - Larger touch targets */
+    .form-group {
+        margin-bottom: 16px;
+    }
+    
+    .form-group input,
+    .form-group select {
+        padding: 14px;
+        font-size: 16px;
+        min-height: 48px;
+        width: 100%;
     }
     
     /* Alerts - Adjust position and width */
@@ -1447,25 +1578,29 @@ body {
         right: 8px;
         left: 8px;
         width: auto;
+        position: fixed;
     }
     
     .alert {
-        margin-bottom: 4px;
+        margin-bottom: 8px;
     }
     
     /* Buttons - Larger touch targets */
     .btn {
-        padding: 10px 16px;
-        font-size: 13px;
-        min-height: 44px;
+        padding: 12px 20px;
+        font-size: 14px;
+        min-height: 48px;
+        width: 100%;
     }
     
-    /* Form inputs - Larger touch targets */
-    .form-group input,
-    .form-group select {
-        padding: 12px;
-        font-size: 14px;
-        min-height: 44px;
+    /* Tab content - ensure visibility */
+    .tab-content {
+        display: none;
+    }
+    
+    .tab-content.active {
+        display: flex;
+        flex-direction: column;
     }
 }
 
@@ -1515,13 +1650,13 @@ body {
     
     /* Compact spot rates */
     .spot-rate-item {
-        padding: 5px 6px;
+        padding: 6px 8px;
         font-size: 11px;
     }
     
     /* Compact greek items */
     .greek-item {
-        padding: 5px 8px;
+        padding: 6px 10px;
     }
     
     .greek-label {
@@ -1558,7 +1693,7 @@ body {
     
     .ladder-table th,
     .ladder-table td {
-        padding: 6px 8px;
+        padding: 8px 10px;
     }
     
     /* Impact gauges - smaller */
@@ -1582,7 +1717,7 @@ body {
     
     /* News items - compact */
     .news-impact-item {
-        padding: 10px;
+        padding: 12px;
     }
     
     .news-impact-item .news-headline {
@@ -1592,25 +1727,52 @@ body {
     /* Vol surface compact */
     .vol-item {
         font-size: 11px;
-        padding: 3px 6px;
+        padding: 4px 8px;
     }
     
     /* Modal adjustments */
+    .modal-header {
+        padding: 12px;
+    }
+    
     .modal-header h2 {
         font-size: 14px;
     }
     
     .close-btn {
-        font-size: 20px;
+        font-size: 24px;
+        min-width: 44px;
+        min-height: 44px;
     }
     
     /* Form compact */
     .form-group {
-        margin-bottom: 12px;
+        margin-bottom: 14px;
     }
     
     .form-group label {
+        font-size: 12px;
+    }
+    
+    /* Tab buttons - compact */
+    .tab-btn {
+        padding: 6px 10px;
         font-size: 11px;
+    }
+    
+    /* Combined impact section - stack on mobile */
+    .combined-impact-section {
+        padding: 10px;
+    }
+    
+    .impact-comparison {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .impact-arrow {
+        transform: rotate(90deg);
+        text-align: center;
     }
 }
 
@@ -1691,6 +1853,48 @@ body {
 
 .news-link:hover {
     text-decoration: underline;
+}
+
+/* Remove news button */
+.remove-news-btn {
+    display: inline-block;
+    background: rgba(239, 68, 68, 0.3);
+    color: var(--accent-red);
+    border: 1px solid var(--accent-red);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-size: 16px;
+    line-height: 20px;
+    text-align: center;
+    cursor: pointer;
+    margin-left: 8px;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.remove-news-btn:hover {
+    background: var(--accent-red);
+    color: white;
+    opacity: 1;
+}
+
+/* Reset excluded news button */
+.reset-news-btn {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--accent-blue);
+    border: 1px solid var(--accent-blue);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.reset-news-btn:hover {
+    background: var(--accent-blue);
+    color: white;
 }
 
 .news-empty {
@@ -1898,6 +2102,209 @@ body {
     color: var(--accent-purple);
 }
 
+/* Combined Impact Section */
+.combined-impact-section {
+    padding: 10px 12px;
+}
+
+.impact-comparison {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 8px;
+    background-color: var(--bg-card);
+    border-radius: 4px;
+}
+
+.impact-column {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.impact-arrow {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.impact-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.greek-compare-item {
+    display: flex;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.greek-compare-item .label {
+    color: var(--text-muted);
+}
+
+.greek-compare-item .value {
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: var(--text-primary);
+}
+
+.greek-compare-item .value.positive {
+    color: var(--accent-green);
+}
+
+.greek-compare-item .value.negative {
+    color: var(--accent-red);
+}
+
+.spot-impacts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.spot-impact-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    background-color: var(--bg-card);
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.spot-impact-pair {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.spot-impact-change {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-weight: 500;
+}
+
+.spot-impact-change.positive {
+    color: var(--accent-green);
+}
+
+.spot-impact-change.negative {
+    color: var(--accent-red);
+}
+
+.spot-impact-delta {
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+/* Responsive for combined impact */
+@media (max-width: 768px) {
+    .combined-impact-section {
+        padding: 8px 10px;
+    }
+    
+    .impact-comparison {
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px;
+    }
+    
+    .impact-arrow {
+        transform: rotate(90deg);
+        font-size: 12px;
+    }
+    
+    .spot-impacts-list {
+        gap: 4px;
+    }
+    
+    .spot-impact-item {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .impact-comparison {
+        padding: 8px;
+    }
+    
+    .greek-compare-item {
+        font-size: 10px;
+    }
+}
+
+/* Alert badges */
+.alert-badge {
+    background-color: var(--accent-red);
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    font-weight: 600;
+    animation: pulse 2s infinite;
+}
+
+/* Alerts tab summary */
+.alerts-summary {
+    display: flex;
+    justify-content: space-around;
+    padding: 16px 20px;
+    background-color: var(--bg-card);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.alerts-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+}
+
+.alerts-empty,
+.positions-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 24px;
+    text-align: center;
+}
+
+@media (max-width: 768px) {
+    .alerts-summary {
+        padding: 12px;
+    }
+    
+    .alerts-list {
+        padding: 12px;
+    }
+    
+    .alert-item {
+        padding: 10px 12px;
+    }
+}
+
+.alert-detail {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.alerts-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 24px;
+    text-align: center;
+}
+
+/* Positions Empty State */
+.positions-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 24px;
+    text-align: center;
+}
+
 /* Alert List Items (in Alerts tab panel) */
 .alert-item {
     background-color: var(--bg-card);
@@ -1930,24 +2337,10 @@ body {
     background: linear-gradient(135deg, var(--bg-card) 0%, rgba(234, 179, 8, 0.08) 100%);
 }
 
-.alert-detail {
-    font-family: 'Monaco', 'Menlo', monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 4px;
-}
-
-.alerts-empty {
-    color: var(--text-muted);
-    font-size: 12px;
-    padding: 24px;
-    text-align: center;
-}
-
-/* Positions Empty State */
-.positions-empty {
-    color: var(--text-muted);
-    font-size: 12px;
-    padding: 24px;
-    text-align: center;
+/* Mobile alert items */
+@media (max-width: 768px) {
+    .alert-item {
+        padding: 12px 14px;
+        margin-bottom: 6px;
+    }
 }
