@@ -1144,6 +1144,11 @@ function updatePositionsList(positions, positionGreeks) {
         const tenorLabel = getTenorLabel(pos.tenor);
         const optionTypeColor = pos.quantity >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
         
+        // Get initial Greeks if available
+        const initialGreeks = pos.initial_greeks || {};
+        const bookingSpotRate = pos.booking_spot_rate || pos.spot || null;
+        const bookingTime = pos.booking_timestamp ? new Date(pos.booking_timestamp).toLocaleString() : 'N/A';
+        
         div.innerHTML = `
             <div class="position-header">
                 <span class="instrument">${pos.instrument}</span>
@@ -1164,13 +1169,29 @@ function updatePositionsList(positions, positionGreeks) {
                         ${pos.quantity >= 0 ? '+' : ''}${formatNumber(pos.quantity, 0)}
                     </span>
                 </div>
+                ${bookingSpotRate !== null ? `
+                <div class="detail-item booking-spot">
+                    <span class="detail-label">Book Spot</span>
+                    <span class="detail-value">${bookingSpotRate.toFixed(5)}</span>
+                </div>
+                ` : ''}
             </div>
-            <div class="position-greeks">
+            <div class="position-greeks current-greeks">
+                <span class="greek-label">Current:</span>
                 <span class="mini-greek">D: <span>${formatNumber(greeks.delta || 0, 2)}</span></span>
                 <span class="mini-greek">G: <span>${formatNumber(greeks.gamma || 0, 4)}</span></span>
                 <span class="mini-greek">V: <span>${formatNumber(greeks.vega || 0, 2)}</span></span>
                 <span class="mini-greek">T: <span>${formatNumber(greeks.theta || 0, 2)}</span></span>
             </div>
+            ${initialGreeks.delta !== undefined ? `
+            <div class="position-greeks initial-greeks">
+                <span class="greek-label">Initial:</span>
+                <span class="mini-greek">D: <span>${formatNumber(initialGreeks.delta || 0, 2)}</span></span>
+                <span class="mini-greek">G: <span>${formatNumber(initialGreeks.gamma || 0, 4)}</span></span>
+                <span class="mini-greek">V: <span>${formatNumber(initialGreeks.vega || 0, 2)}</span></span>
+                <span class="mini-greek">T: <span>${formatNumber(initialGreeks.theta || 0, 2)}</span></span>
+            </div>
+            ` : ''}
         `;
         
         // Click to delete
@@ -1496,6 +1517,14 @@ async function recomputeGreeksWithExclusions() {
         const data = await response.json();
         console.log('Recomputed Greeks with exclusions:', data);
         
+        // Update currentImpactData with new data so tab switching works correctly
+        if (!currentImpactData) {
+            currentImpactData = {};
+        }
+        currentImpactData.news_impacts = data.news_impacts;
+        currentImpactData.trace_id = data.trace_id;
+        currentImpactData.baseline_greeks = data.baseline_greeks;
+        
         // Update baseline display
         document.getElementById('baselineVega').textContent = formatNumber(data.baseline_greeks.vega, 2);
         
@@ -1504,6 +1533,9 @@ async function recomputeGreeksWithExclusions() {
             currentGreeks = data.current_greeks;
             updateGreeksDisplay(data.current_greeks);
         }
+        
+        // Also update currentHeadlines to keep in sync with currentImpactData.news_impacts
+        currentHeadlines = data.news_impacts;
         
         // Update news list with remaining impacts
         updateNewsImpactList(data.news_impacts);

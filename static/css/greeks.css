@@ -419,6 +419,57 @@ body {
     color: var(--text-primary);
 }
 
+/* Position Card - Booking Spot Rate */
+.position-card .booking-spot {
+    border-top: 1px dashed var(--border-color);
+    padding-top: 6px;
+    margin-top: 4px;
+}
+
+.position-card .booking-spot .detail-label {
+    color: var(--accent-yellow);
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+/* Position Card - Initial Greeks */
+.position-card .position-greeks {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+    font-size: 11px;
+}
+
+.position-card .position-greeks.current-greeks {
+    border-top: 2px solid var(--accent-blue);
+}
+
+.position-card .position-greeks.initial-greeks {
+    border-top: 2px dashed var(--accent-green);
+    background-color: rgba(34, 197, 94, 0.05);
+    margin-top: 4px;
+    padding: 6px 8px;
+    border-radius: 4px;
+}
+
+.position-card .greek-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    align-self: center;
+}
+
+.position-card .current-greeks .greek-label {
+    color: var(--accent-blue);
+}
+
+.position-card .initial-greeks .greek-label {
+    color: var(--accent-green);
+}
+
 /* Buttons */
 .btn {
     padding: 6px 12px;

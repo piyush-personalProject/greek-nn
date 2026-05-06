@@ -307,58 +307,103 @@ async def _spot_rate_alert_monitor():
 
 def _create_demo_portfolio():
     """Create a demo portfolio for testing."""
-    positions = [
-        PortfolioPosition(
-            position_id="TRADE-001",
-            instrument="EURUSD",
-            spot=1.0850,
-            strike=1.0900,
-            tenor=1/12,  # 1M
-            quantity=1000000,
-            option_type="CALL",
-            portfolio_id="FX-PORTFOLIO-01"
-        ),
-        PortfolioPosition(
-            position_id="TRADE-002",
-            instrument="EURUSD",
-            spot=1.0850,
-            strike=1.0800,
-            tenor=3/12,  # 3M
-            quantity=-500000,
-            option_type="PUT",
-            portfolio_id="FX-PORTFOLIO-01"
-        ),
-        PortfolioPosition(
-            position_id="TRADE-003",
-            instrument="USDJPY",
-            spot=149.50,
-            strike=150.00,
-            tenor=1/52,  # 1W
-            quantity=2000000,
-            option_type="CALL",
-            portfolio_id="FX-PORTFOLIO-01"
-        ),
-        PortfolioPosition(
-            position_id="TRADE-004",
-            instrument="GBPUSD",
-            spot=1.2650,
-            strike=1.2600,
-            tenor=6/12,  # 6M
-            quantity=750000,
-            option_type="PUT",
-            portfolio_id="FX-PORTFOLIO-01"
-        ),
-        PortfolioPosition(
-            position_id="TRADE-005",
-            instrument="USDJPY",
-            spot=149.50,
-            strike=148.00,
-            tenor=1/12,  # 1M
-            quantity=-1500000,
-            option_type="CALL",
-            portfolio_id="FX-PORTFOLIO-01"
-        ),
-    ]
+    # Get vol surface for computing initial Greeks
+    vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+    
+    positions = []
+    for i, (pos_data) in enumerate([
+        {
+            "position_id": "TRADE-001",
+            "instrument": "EURUSD",
+            "spot": 1.0850,
+            "strike": 1.0900,
+            "tenor": 1/12,  # 1M
+            "quantity": 1000000,
+            "option_type": "CALL",
+        },
+        {
+            "position_id": "TRADE-002",
+            "instrument": "EURUSD",
+            "spot": 1.0850,
+            "strike": 1.0800,
+            "tenor": 3/12,  # 3M
+            "quantity": -500000,
+            "option_type": "PUT",
+        },
+        {
+            "position_id": "TRADE-003",
+            "instrument": "USDJPY",
+            "spot": 149.50,
+            "strike": 150.00,
+            "tenor": 1/52,  # 1W
+            "quantity": 2000000,
+            "option_type": "CALL",
+        },
+        {
+            "position_id": "TRADE-004",
+            "instrument": "GBPUSD",
+            "spot": 1.2650,
+            "strike": 1.2600,
+            "tenor": 6/12,  # 6M
+            "quantity": 750000,
+            "option_type": "PUT",
+        },
+        {
+            "position_id": "TRADE-005",
+            "instrument": "USDJPY",
+            "spot": 149.50,
+            "strike": 148.00,
+            "tenor": 1/12,  # 1M
+            "quantity": -1500000,
+            "option_type": "CALL",
+        },
+    ]):
+        booking_spot_rate = _current_spot_rates.get(pos_data["instrument"], pos_data["spot"])
+        
+        # Compute initial Greeks at booking time
+        initial_greeks = None
+        try:
+            temp_portfolio = Portfolio(
+                portfolio_id="FX-PORTFOLIO-01",
+                timestamp=datetime.now(),
+                positions=[
+                    PortfolioPosition(
+                        position_id=pos_data["position_id"],
+                        instrument=pos_data["instrument"],
+                        spot=booking_spot_rate,
+                        strike=pos_data["strike"],
+                        tenor=pos_data["tenor"],
+                        quantity=pos_data["quantity"],
+                        option_type=pos_data["option_type"],
+                        portfolio_id="FX-PORTFOLIO-01"
+                    )
+                ],
+                base_currency="USD"
+            )
+            initial_pg = risk_engine.compute_portfolio_greeks(
+                portfolio=temp_portfolio,
+                vol_surface=vol_surface,
+                spot_rates={pos_data["instrument"]: booking_spot_rate},
+                risk_free_rate=0.05
+            )
+            initial_greeks = initial_pg.position_greeks.get(pos_data["position_id"])
+        except Exception as e:
+            logger.warning(f"Failed to compute initial Greeks for {pos_data['position_id']}: {e}")
+        
+        positions.append(PortfolioPosition(
+            position_id=pos_data["position_id"],
+            instrument=pos_data["instrument"],
+            spot=pos_data["spot"],
+            strike=pos_data["strike"],
+            tenor=pos_data["tenor"],
+            quantity=pos_data["quantity"],
+            option_type=pos_data["option_type"],
+            portfolio_id="FX-PORTFOLIO-01",
+            booking_spot_rate=booking_spot_rate,
+            booking_vol_surface_version=vol_surface.version if vol_surface else None,
+            booking_timestamp=datetime.now(),
+            initial_greeks=initial_greeks
+        ))
     
     _portfolios["FX-PORTFOLIO-01"] = Portfolio(
         portfolio_id="FX-PORTFOLIO-01",
@@ -1754,18 +1799,55 @@ async def create_trade(
     # Generate new trade ID
     trade_id = f"TRADE-{len(portfolio.positions) + 1:03d}"
     
-    # Get spot for instrument
-    spot = _current_spot_rates.get(trade.instrument, 1.0)
+    # Get spot for instrument at booking time
+    booking_spot_rate = _current_spot_rates.get(trade.instrument, 1.0)
+    
+    # Get current vol surface for booking
+    vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+    
+    # Compute initial Greeks at booking time
+    initial_greeks = None
+    try:
+        # Create a temporary position to compute Greeks
+        temp_position = PortfolioPosition(
+            position_id=trade_id,
+            instrument=trade.instrument,
+            spot=booking_spot_rate,
+            strike=trade.strike,
+            tenor=trade.tenor,
+            quantity=trade.quantity,
+            option_type=trade.option_type.upper(),
+            portfolio_id=portfolio_id
+        )
+        temp_portfolio = Portfolio(
+            portfolio_id=portfolio_id,
+            timestamp=datetime.now(),
+            positions=[temp_position],
+            base_currency="USD"
+        )
+        initial_pg = risk_engine.compute_portfolio_greeks(
+            portfolio=temp_portfolio,
+            vol_surface=vol_surface,
+            spot_rates={trade.instrument: booking_spot_rate},
+            risk_free_rate=0.05
+        )
+        initial_greeks = initial_pg.position_greeks.get(trade_id)
+    except Exception as e:
+        logger.warning(f"Failed to compute initial Greeks for trade {trade_id}: {e}")
     
     new_position = PortfolioPosition(
         position_id=trade_id,
         instrument=trade.instrument,
-        spot=spot,
+        spot=booking_spot_rate,
         strike=trade.strike,
         tenor=trade.tenor,
         quantity=trade.quantity,
         option_type=trade.option_type.upper(),
-        portfolio_id=portfolio_id
+        portfolio_id=portfolio_id,
+        booking_spot_rate=booking_spot_rate,
+        booking_vol_surface_version=vol_surface.version if vol_surface else None,
+        booking_timestamp=datetime.now(),
+        initial_greeks=initial_greeks
     )
     
     portfolio.positions.append(new_position)

@@ -90,26 +90,6 @@ class VolSurface(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
-class PortfolioPosition(BaseModel):
-    """Single position in portfolio."""
-    position_id: str
-    instrument: str
-    spot: float = Field(gt=0)
-    strike: float = Field(gt=0)
-    tenor: float = Field(gt=0)  # in years
-    quantity: float
-    option_type: str  # CALL, PUT
-    portfolio_id: str
-
-
-class Portfolio(BaseModel):
-    """Portfolio snapshot."""
-    portfolio_id: str
-    timestamp: datetime
-    positions: List[PortfolioPosition]
-    base_currency: str = "USD"
-
-
 class Greeks(BaseModel):
     """Greek risk measures."""
     delta: float
@@ -149,6 +129,43 @@ class Greeks(BaseModel):
             "vanna": self.vanna,
             "volga": self.volga,
         }
+
+
+class PortfolioPosition(BaseModel):
+    """Single position in portfolio."""
+    position_id: str
+    instrument: str
+    spot: float = Field(gt=0)
+    strike: float = Field(gt=0)
+    tenor: float = Field(gt=0)  # in years
+    quantity: float
+    option_type: str  # CALL, PUT
+    portfolio_id: str
+    # Booking-time data for trade reference
+    booking_spot_rate: Optional[float] = Field(
+        default=None,
+        description="Spot rate at time of trade booking"
+    )
+    booking_vol_surface_version: Optional[str] = Field(
+        default=None,
+        description="Vol surface version at time of trade booking"
+    )
+    booking_timestamp: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp when trade was booked"
+    )
+    initial_greeks: Optional[Greeks] = Field(
+        default=None,
+        description="Greeks computed at time of trade booking"
+    )
+
+
+class Portfolio(BaseModel):
+    """Portfolio snapshot."""
+    portfolio_id: str
+    timestamp: datetime
+    positions: List[PortfolioPosition]
+    base_currency: str = "USD"
 
 
 class PortfolioGreeks(BaseModel):
