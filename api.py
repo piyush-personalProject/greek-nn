@@ -1368,14 +1368,17 @@ async def get_news_with_impact(max_results: int = 10):
                     }
                 })
             
-            # Sort news by category and sentiment score, unknown last
+            # Sort news by category, sentiment (negative/positive/neutral), and sentiment score
             def sort_key(item):
                 event_type = item["event_type"]
+                sentiment = item["sentiment"]
                 sentiment_score = item["sentiment_score"]
                 # Unknown category gets highest sort value (last)
                 unknown_sort = 0 if event_type != "unknown" else 1000
-                # Sort by category first, then by sentiment score (descending)
-                return (unknown_sort, event_type, -sentiment_score)
+                # Sentiment order: negative (0), positive (1), neutral (2)
+                sentiment_order = {"negative": 0, "positive": 1, "neutral": 2}.get(sentiment, 3)
+                # Sort by category first, then sentiment order, then by sentiment score (descending)
+                return (unknown_sort, event_type, sentiment_order, -sentiment_score)
             
             impact_results = sorted(impact_results, key=sort_key)
             
@@ -1515,14 +1518,17 @@ async def get_news_impact(max_results: int = 10):
                     }
                 })
             
-            # Sort news by category and sentiment score, unknown last
+            # Sort news by category, sentiment (negative/positive/neutral), and sentiment score
             def sort_key(item):
                 event_type = item["event_type"]
+                sentiment = item["sentiment"]
                 sentiment_score = item["sentiment_score"]
                 # Unknown category gets highest sort value (last)
                 unknown_sort = 0 if event_type != "unknown" else 1000
-                # Sort by category first, then by sentiment score (descending)
-                return (unknown_sort, event_type, -sentiment_score)
+                # Sentiment order: negative (0), positive (1), neutral (2)
+                sentiment_order = {"negative": 0, "positive": 1, "neutral": 2}.get(sentiment, 3)
+                # Sort by category first, then sentiment order, then by sentiment score (descending)
+                return (unknown_sort, event_type, sentiment_order, -sentiment_score)
             
             impact_results = sorted(impact_results, key=sort_key)
             

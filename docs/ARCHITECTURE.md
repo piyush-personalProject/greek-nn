@@ -2,9 +2,10 @@
 
 ## System Overview
 
+
 The GreekNN Risk System is a portfolio risk management library that processes news events through NLP to generate volatility shocks, applies them to a vol surface, and computes neural network-based Greeks for risk assessment.
 
-**Current Status:** All core Python modules implemented (1-5). REST API server (FastAPI) fully operational with WebSocket support for real-time Greeks visualization.
+**Current Status:** All core Python modules implemented (1-8). REST API server (FastAPI) fully operational with WebSocket support for real-time Greeks visualization.
 
 ## Project Components
 
@@ -87,12 +88,37 @@ The GreekNN Risk System is a portfolio risk management library that processes ne
 │                                                               │                                     │
 │                                                               ▼                                     │
 │  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │                    MODULE 6: ALERT SYSTEM (planned)                                          │ │
+│  │                    MODULE 6: ALERT SYSTEM (services/alert_service.py)                            │ │
 │  │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐    │ │
-│  │  │  AlertEngine                                                                             │    │ │
-│  │  │  ├── Risk limit monitoring (vega, gamma, delta, rho)                                    │    │ │
-│  │  │  ├── Threshold-based alert generation                                                    │    │ │
-│  │  │  └── Action recommendations                                                               │    │ │
+│  │  │  AlertService                                                                             │    │ │
+│  │  │  ├── Spot rate movement monitoring (move, spike, trend detection)                        │    │ │
+│  │  │  ├── Risk limit monitoring (vega, gamma, delta, rho thresholds)                         │    │ │
+│  │  │  ├── Threshold-based alert generation with severity levels                              │    │ │
+│  │  │  ├── Alert cooldown and rate limiting                                                    │    │ │
+│  │  │  └── Alert acknowledgment and cleanup                                                     │    │ │
+│  │  └─────────────────────────────────────────────────────────────────────────────────────────┘    │ │
+│  └────────────────────────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                                      │
+│  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    MODULE 7: FOREX SERVICE (services/forex_service.py)                           │ │
+│  │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐    │ │
+│  │  │  ForexService                                                                            │    │ │
+│  │  │  ├── Live spot rate fetching via Alpha Vantage/Frankfurter APIs                        │    │ │
+│  │  │  ├── Multi-currency support (EURUSD, USDJPY, GBPUSD, USDCHF, AUDUSD, USDCAD, NZDUSD)  │    │ │
+│  │  │  ├── Baseline rate tracking and change calculation                                     │    │ │
+│  │  │  └── Historical data retrieval                                                          │    │ │
+│  │  └─────────────────────────────────────────────────────────────────────────────────────────┘    │ │
+│  └────────────────────────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                                      │
+│  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    MODULE 8: AUDIT SERVICE (services/audit_service.py)                          │ │
+│  │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐    │ │
+│  │  │  AuditService                                                                            │    │ │
+│  │  │  ├── Full pipeline traceability via SQLite in-memory database                         │    │ │
+│  │  │  ├── Trace IDs linking all pipeline stages                                             │    │ │
+│  │  │  │     NewsEvent → EventVector → VolShock → VolSurface → GreeksSnapshot              │    │ │
+│  │  │  ├── Thread-safe connections using shared cache                                       │    │ │
+│  │  │  └── Recent traces listing with status filtering                                       │    │ │
 │  │  └─────────────────────────────────────────────────────────────────────────────────────────┘    │ │
 │  └────────────────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                                      │

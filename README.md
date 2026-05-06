@@ -6,7 +6,7 @@ A real-time neural network-based portfolio risk management system with a FastAPI
 
 The GreekNN Risk System is a modular Python library designed for financial institutions to perform portfolio risk analysis. It integrates news ingestion, NLP-based event processing, volatility shock modeling, and neural network-based Greeks computation with a web-based UI.
 
-**Status:** All core Python modules implemented. FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization and news impact analysis.
+**Status:** All core Python modules implemented (1-8). FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization and news impact analysis.
 
 ## Key Features
 
@@ -69,7 +69,8 @@ greek_nn/
 ├── vol_surface_service.py    # Module 4: Vol Surface Service
 ├── services/                 # Service modules
 │   ├── alert_service.py      # Module 6: Alert System (spot rate & risk alerts)
-│   └── forex_service.py      # Live forex spot rate integration
+│   ├── audit_service.py     # Module 8: Audit Service (pipeline traceability)
+│   └── forex_service.py      # Module 7: Live forex spot rate integration
 ├── requirements.txt          # Python dependencies
 ├── run_tests.py             # Test runner script
 ├── pytest.ini               # Pytest configuration
@@ -403,7 +404,7 @@ print(f"Tenors: {surface.tenors}")
 
 ## Architecture
 
-The system consists of 7 main modules:
+The system consists of 8 main modules:
 
 1. **News Ingestion** (`news_ingestion.py`) - Real-time headline aggregation from NewsAPI, RSS feeds
 2. **NLP Processing** (`nlp_engine.py`) - Event vector extraction using FinBERT sentiment analysis
@@ -412,6 +413,7 @@ The system consists of 7 main modules:
 5. **NN Risk Engine** (`nn_risk_engine.py`) - Greeks computation (ONNX/PyTorch/Black-Scholes)
 6. **Alert System** (`services/alert_service.py`) - Risk limit monitoring and spot rate alerts
 7. **Forex Service** (`services/forex_service.py`) - Live forex spot rate integration with Alpha Vantage/Frankfurter APIs
+8. **Audit Service** (`services/audit_service.py`) - Full pipeline traceability via SQLite in-memory database
 
 ### Logging System
 
