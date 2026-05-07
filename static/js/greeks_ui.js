@@ -1398,13 +1398,16 @@ function closeTradeModal() {
 async function handleTradeSubmit(event) {
     event.preventDefault();
     
+    const spotRateValue = document.getElementById('tradeSpotRate').value;
+    
     const tradeData = {
         instrument: document.getElementById('tradeInstrument').value,
         strike: parseFloat(document.getElementById('tradeStrike').value),
         tenor: parseFloat(document.getElementById('tradeTenor').value),
         quantity: parseFloat(document.getElementById('tradeQuantity').value),
         option_type: document.getElementById('tradeOptionType').value,
-        portfolio_id: currentPortfolio
+        portfolio_id: currentPortfolio,
+        spot_rate: spotRateValue ? parseFloat(spotRateValue) : undefined
     };
     
     try {

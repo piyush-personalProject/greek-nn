@@ -1943,8 +1943,8 @@ async def create_trade(
     # Generate new trade ID
     trade_id = f"TRADE-{len(portfolio.positions) + 1:03d}"
     
-    # Get spot for instrument at booking time
-    booking_spot_rate = _current_spot_rates.get(trade.instrument, 1.0)
+    # Get spot for instrument at booking time - use provided spot_rate or fall back to current rate
+    booking_spot_rate = trade.spot_rate if trade.spot_rate is not None else _current_spot_rates.get(trade.instrument, 1.0)
     
     # Get current vol surface for booking
     vol_surface = _current_vol_surface or create_mock_surface(datetime.now())

@@ -239,6 +239,10 @@ class TradeCreate(BaseModel):
     quantity: float
     option_type: str
     portfolio_id: str = "FX-PORTFOLIO-01"
+    spot_rate: Optional[float] = Field(
+        default=None,
+        description="Spot rate at time of trade booking (optional, uses live rate if not provided)"
+    )
 
 
 class GreeksImpactWeights(BaseModel):
