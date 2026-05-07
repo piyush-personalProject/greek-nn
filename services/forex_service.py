@@ -163,10 +163,8 @@ class ForexService:
                     rate = rates.get(to_currency)
                     
                     if rate:
-                        # For XXXUSD pairs where to_currency is USD, 
-                        # Frankfurter returns the rate as from/to, need to invert
-                        if to_currency == "USD":
-                            rate = 1.0 / rate
+                        # For XXXYYY pairs, Frankfurter returns direct rate (1 from = X to)
+                        # No inversion needed - the rate is already correct
                         logger.debug(f"Fetched {pair} from Frankfurter: {rate}")
                         return rate
                     
@@ -266,10 +264,11 @@ class ForexService:
             "NZDUSD": 0.6050
         }
         
-        # Add small random variation to simulate market movement
+        # Add random variation to simulate market movement
+        # Use 0.5% variation to produce visible Greek differences
         import random
         base_rate = mock_rates.get(pair, 1.0)
-        variation = base_rate * 0.0001  # 0.01% variation
+        variation = base_rate * 0.005  # 0.5% variation
         return base_rate + random.uniform(-variation, variation)
     
     def _get_fallback_rate(self, pair: str) -> float:

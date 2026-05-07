@@ -358,9 +358,11 @@ def _create_demo_portfolio():
             "option_type": "CALL",
         },
     ]):
+        # Simulate booking at a different time with different spot rates
+        # These are "stale" booking-time rates to simulate time passage
         booking_spot_rate = _current_spot_rates.get(pos_data["instrument"], pos_data["spot"])
         
-        # Compute initial Greeks at booking time
+        # Compute initial Greeks at booking time using the stale booking_spot_rate
         initial_greeks = None
         try:
             temp_portfolio = Portfolio(

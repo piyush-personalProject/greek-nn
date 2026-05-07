@@ -849,6 +849,147 @@ Every API request automatically receives a `X-Trace-ID` response header for corr
 - Middleware generates new trace ID if not provided
 - All log messages include trace context
 
+## Vega Impact Calculation: News Sentiment to Greeks
+
+The system calculates vega impact from positive/negative news through a multi-stage pipeline. This section explains the complete flow with detailed examples.
+
+### Stage 1: Sentiment Analysis
+
+**File:** [`nlp_engine.py:216-238`](nlp_engine.py:216)
+
+News headlines are processed through FinBERT to extract sentiment:
+
+| Sentiment | Score Range | Example Headline |
+|-----------|-------------|------------------|
+| POSITIVE | +0.5 to +1.0 | "Fed signals rate cuts amid cooling inflation" → +0.73 |
+| NEGATIVE | -1.0 to -0.5 | "Recession fears mount as GDP contracts" → -0.82 |
+| NEUTRAL | -0.5 to +0.5 | "ECB holds rates steady as expected" → +0.05 |
+
+The sentiment score directly influences the volatility shock magnitude.
+
+### Stage 2: Volatility Shock Prediction
+
+**File:** [`vol_shock_model.py:407-467`](vol_shock_model.py:407)
+
+The rule-based model computes volatility shocks using:
+
+```python
+base_impact = sentiment_score * importance * 0.3
+surprise_boost = 1.0 + surprise_factor * 0.5
+delta_ATM = base_impact * tenor_multiplier * surprise_boost
+```
+
+**Key insight:** `sentiment_score` directly multiplies the shock magnitude.
+
+- **Negative sentiment** → Negative vol shocks (vol surface decreases)
+- **Positive sentiment** → Positive vol shocks (vol surface increases)
+
+**Tenor Multipliers** (for INTEREST_RATE events):
+
+| Tenor | Multiplier | Rationale |
+|-------|------------|-----------|
+| 1W | 1.5 | Short-term vol most sensitive to rate decisions |
+| 1M | 1.8 | Immediate market reaction |
+| 3M | 1.5 | Medium-term adjustment |
+| 6M | 1.2 | Longer-term normalization |
+| 1Y | 1.0 | Baseline reference |
+
+### Stage 3: Vol Surface Application
+
+**File:** [`vol_surface_service.py:263-266`](vol_surface_service.py:263)
+
+```python
+shocked_vol[tenor_idx][:] = shocked_vol[tenor_idx][:] * (1.0 + shock_amount)
+```
+
+| News Sentiment | Shock Direction | Vol Surface Effect |
+|----------------|------------------|-------------------|
+| Negative | Negative | Vol decreases (markets expect calmer conditions) |
+| Positive | Positive | Vol increases (markets expect higher activity) |
+
+### Stage 4: Vega Calculation
+
+**File:** [`nn_risk_engine.py:95-101`](nn_risk_engine.py:95)
+
+Vega is computed via Black-Scholes:
+
+```python
+def vega(S, K, T, r, sigma):
+    d1 = (log(S/K) + (r + 0.5*sigma²)*T) / (sigma*sqrt(T))
+    return S * norm.pdf(d1) * sqrt(T) / 100  # Per 1% vol change
+```
+
+**Why lower vol = lower vega:** Vega is proportional to `norm.pdf(d1) * sqrt(T)`. When volatility decreases due to negative news, the vega exposure of each option reduces.
+
+### Complete Example: Negative News Impact on Vega
+
+**Input:**
+```
+Headline: "Fed signals potential rate cuts amid cooling inflation"
+Event Type: INTEREST_RATE
+Sentiment: NEGATIVE (-0.73)
+Importance: 0.82
+Surprise Factor: 0.6
+```
+
+**Calculation:**
+
+| Step | Formula | Value |
+|------|---------|-------|
+| Base Impact | sentiment × importance × 0.3 | -0.73 × 0.82 × 0.3 = **-0.180** |
+| Surprise Boost | 1 + surprise × 0.5 | 1 + 0.6 × 0.5 = **1.30** |
+| 1M ATM Delta | base × 1.8 × boost | -0.180 × 1.8 × 1.30 = **-0.421** |
+| Baseline Vol | 10.0% | 10.0% |
+| Shocked Vol | 10.0% × (1 + (-0.421)) | **9.58%** |
+
+**Resulting Vega Change:**
+
+| Greek | Baseline | Shocked | Δ Change |
+|-------|----------|---------|----------|
+| Delta | $50,000 | $48,000 | -$2,000 |
+| Gamma | $12,000 | $11,500 | -$500 |
+| **Vega** | **$100,000** | **$97,000** | **-$3,000** |
+
+### Complete Example: Positive News Impact on Vega
+
+**Input:**
+```
+Headline: "NFP report shows stronger than expected employment growth"
+Event Type: EMPLOYMENT
+Sentiment: POSITIVE (+0.68)
+Importance: 0.75
+Surprise Factor: 0.4
+```
+
+**Calculation:**
+
+| Step | Formula | Value |
+|------|---------|-------|
+| Base Impact | sentiment × importance × 0.3 | 0.68 × 0.75 × 0.3 = **+0.153** |
+| Surprise Boost | 1 + surprise × 0.5 | 1 + 0.4 × 0.5 = **1.20** |
+| 1M ATM Delta | base × 1.2 × boost | 0.153 × 1.2 × 1.20 = **+0.220** |
+| Baseline Vol | 10.0% | 10.0% |
+| Shocked Vol | 10.0% × (1 + 0.220) | **12.20%** |
+
+**Resulting Vega Change:**
+
+| Greek | Baseline | Shocked | Δ Change |
+|-------|----------|---------|----------|
+| Delta | $50,000 | $51,500 | +$1,500 |
+| Gamma | $12,000 | $12,300 | +$300 |
+| **Vega** | **$100,000** | **$103,500** | **+$3,500** |
+
+### Intuition Summary
+
+| Scenario | News Sentiment | Vol Impact | Vega Impact |
+|----------|----------------|------------|-------------|
+| Rate cut signals | Negative | Decreases | **Lowers** vega exposure |
+| Strong employment | Positive | Increases | **Raises** vega exposure |
+| Central bank hawkishness | Negative | Increases | **Raises** vega exposure |
+| Peaceful geopolitical news | Positive | Decreases | **Lowers** vega exposure |
+
+**Core Principle:** Negative news (e.g., recession fears) typically causes markets to expect calmer conditions → lower implied volatility → lower vega. Positive news (e.g., strong economic data) suggests higher market activity → higher implied vol → higher vega.
+
 ## Version History
 
 | Version | Date | Changes |
@@ -859,3 +1000,4 @@ Every API request automatically receives a `X-Trace-ID` response header for corr
 | 2.1.0 | 2026-04 | Implemented Module 2 (NLP Engine with FinBERT) and Module 3 (Vol Shock Model) |
 | 2.2.0 | 2026-04 | Added news-based wireframes, use cases, and UI layouts |
 | 2.3.0 | 2026-05 | Added mobile-friendly UI, sort by category/sentiment, Greeks display at booking, spot movement alerts |
+| 2.4.0 | 2026-05 | Added Vega Impact Calculation section with detailed examples |
