@@ -1146,8 +1146,14 @@ function updatePositionsList(positions, positionGreeks) {
         
         // Get initial Greeks if available
         const initialGreeks = pos.initial_greeks || {};
-        const bookingSpotRate = pos.booking_spot_rate || pos.spot || null;
+        const bookingSpotRate = pos.booking_spot_rate || null;
+        const currentSpotRate = pos.spot || null;
         const bookingTime = pos.booking_timestamp ? new Date(pos.booking_timestamp).toLocaleString() : 'N/A';
+        
+        // Calculate spot rate difference if both are available
+        const spotDiff = (currentSpotRate && bookingSpotRate) ? currentSpotRate - bookingSpotRate : null;
+        const spotDiffClass = spotDiff > 0 ? 'positive' : (spotDiff < 0 ? 'negative' : '');
+        const spotDiffSign = spotDiff > 0 ? '+' : '';
         
         div.innerHTML = `
             <div class="position-header">
@@ -1169,10 +1175,22 @@ function updatePositionsList(positions, positionGreeks) {
                         ${pos.quantity >= 0 ? '+' : ''}${formatNumber(pos.quantity, 0)}
                     </span>
                 </div>
+                ${currentSpotRate !== null ? `
+                <div class="detail-item current-spot">
+                    <span class="detail-label">Current Spot</span>
+                    <span class="detail-value">${currentSpotRate.toFixed(5)}</span>
+                </div>
+                ` : ''}
                 ${bookingSpotRate !== null ? `
                 <div class="detail-item booking-spot">
                     <span class="detail-label">Book Spot</span>
                     <span class="detail-value">${bookingSpotRate.toFixed(5)}</span>
+                </div>
+                ` : ''}
+                ${spotDiff !== null ? `
+                <div class="detail-item spot-diff ${spotDiffClass}">
+                    <span class="detail-label">Spot Diff</span>
+                    <span class="detail-value">${spotDiffSign}${spotDiff.toFixed(5)}</span>
                 </div>
                 ` : ''}
             </div>

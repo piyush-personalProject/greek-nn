@@ -432,6 +432,47 @@ body {
     text-transform: uppercase;
 }
 
+/* Position Card - Current Spot Rate */
+.position-card .current-spot {
+    border-top: 1px solid var(--border-color);
+    padding-top: 6px;
+    margin-top: 4px;
+}
+
+.position-card .current-spot .detail-label {
+    color: var(--accent-blue);
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+/* Position Card - Spot Diff */
+.position-card .spot-diff {
+    border-top: 1px dashed var(--border-color);
+    padding-top: 6px;
+    margin-top: 4px;
+}
+
+.position-card .spot-diff .detail-label {
+    color: var(--text-muted);
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+.position-card .spot-diff .detail-value {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 11px;
+}
+
+.position-card .spot-diff.positive .detail-label,
+.position-card .spot-diff.positive .detail-value {
+    color: var(--accent-green);
+}
+
+.position-card .spot-diff.negative .detail-label,
+.position-card .spot-diff.negative .detail-value {
+    color: var(--accent-red);
+}
+
 /* Position Card - Initial Greeks */
 .position-card .position-greeks {
     display: flex;
