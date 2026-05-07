@@ -652,3 +652,14 @@ This project is proprietary software. See [LICENSE](LICENSE) for details.
 ## Support
 
 For issues and questions, contact the Risk Engineering team.
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2024-01 | Initial architecture |
+| 1.1.0 | 2026-04 | Updated to reflect actual implementation state including FastAPI server |
+| 2.0.0 | 2026-04 | Added WebSocket support, portfolio management, time ladder analysis |
+| 2.1.0 | 2026-04 | Implemented Module 2 (NLP Engine with FinBERT) and Module 3 (Vol Shock Model) |
+| 2.2.0 | 2026-04 | Added news-based wireframes, use cases, and UI layouts |
+| 2.3.0 | 2026-05 | Added mobile-friendly UI, sort by category/sentiment, Greeks display at booking, spot movement alerts |

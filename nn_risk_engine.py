@@ -244,11 +244,22 @@ class NNRiskEngine:
             
             start_time = time.time()
             
+            self.logger.info(
+                f"Computing portfolio Greeks: portfolio_id={portfolio.portfolio_id}, "
+                f"positions={len(portfolio.positions)}, vol_surface_version={vol_surface.version}"
+            )
+            
             total_greeks = Greeks(
                 delta=0.0, gamma=0.0, vega=0.0, theta=0.0, rho=0.0
             )
             position_greeks: Dict[str, Greeks] = {}
             errors = []
+            
+            self.logger.info(
+                f"Vol surface check: tenors={vol_surface.tenors}, "
+                f"volatilities length={len(vol_surface.volatilities)}, "
+                f"spot_rates keys={list(spot_rates.keys())}"
+            )
             
             for position in portfolio.positions:
                 try:
@@ -463,7 +474,21 @@ class NNRiskEngine:
         tenor_idx = np.clip(tenor_idx, 0, len(vol_surface.tenors) - 1)
         
         # ATM vol (strike index 0) - volatilities is list of lists, not numpy array
-        return float(vol_surface.volatilities[tenor_idx][0])
+        if tenor_idx >= len(vol_surface.volatilities):
+            self.logger.error(f"tenor_idx {tenor_idx} out of range for volatilities length {len(vol_surface.volatilities)}")
+            return 0.0
+        if len(vol_surface.volatilities[tenor_idx]) == 0:
+            self.logger.error(f"Empty volatilities at tenor_idx {tenor_idx}")
+            return 0.0
+        
+        vol = float(vol_surface.volatilities[tenor_idx][0])
+        
+        self.logger.debug(
+            f"Getting vol for position {position.position_id}: "
+            f"tenor={position.tenor}, tenor_idx={tenor_idx}, vol={vol}"
+        )
+        
+        return vol
     
     def _compute_position_greeks(
         self,
@@ -546,6 +571,20 @@ class NNRiskEngine:
     ) -> Greeks:
         """Compute Greeks using Black-Scholes formulas."""
         
+        # Guard against invalid inputs
+        if spot <= 0 or position.strike <= 0 or position.tenor <= 0 or vol <= 0:
+            self.logger.error(
+                f"Invalid BS inputs: spot={spot}, strike={position.strike}, "
+                f"tenor={position.tenor}, vol={vol}"
+            )
+            return Greeks(delta=0.0, gamma=0.0, vega=0.0, theta=0.0, rho=0.0)
+        
+        self.logger.debug(
+            f"Computing BS Greeks: spot={spot}, strike={position.strike}, "
+            f"tenor={position.tenor}, vol={vol}, rate={risk_free_rate}, "
+            f"type={position.option_type}, qty={position.quantity}"
+        )
+        
         bs = BlackScholesGreeksCPU
         
         delta = bs.delta(spot, position.strike, position.tenor, 
@@ -559,13 +598,21 @@ class NNRiskEngine:
         rho = bs.rho(spot, position.strike, position.tenor,
                     risk_free_rate, vol, position.option_type)
         
-        return Greeks(
+        result = Greeks(
             delta=float(delta) * position.quantity,
             gamma=float(gamma) * position.quantity,
             vega=float(vega) * position.quantity,
             theta=float(theta) * position.quantity,
             rho=float(rho) * position.quantity
         )
+        
+        self.logger.debug(
+            f"Computed Greeks for {position.position_id}: "
+            f"delta={result.delta:.4f}, gamma={result.gamma:.4f}, "
+            f"vega={result.vega:.4f}, theta={result.theta:.4f}, rho={result.rho:.4f}"
+        )
+        
+        return result
     
     def compute_bucketed_vega(
         self,

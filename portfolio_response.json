@@ -1,0 +1,82 @@
+{
+  "portfolio_id": "FX-PORTFOLIO-01",
+  "timestamp": "2026-05-07T07:59:33.203013",
+  "base_currency": "USD",
+  "positions": [
+    {
+      "position_id": "TRADE-001",
+      "instrument": "EURUSD",
+      "spot": 1.085,
+      "strike": 1.09,
+      "tenor": 0.08333333333333333,
+      "quantity": 1000000.0,
+      "option_type": "CALL",
+      "portfolio_id": "FX-PORTFOLIO-01",
+      "booking_spot_rate": null,
+      "booking_vol_surface_version": null,
+      "booking_timestamp": null,
+      "initial_greeks": null,
+      "timestamp": "2026-05-07T07:59:33.203013"
+    },
+    {
+      "position_id": "TRADE-002",
+      "instrument": "EURUSD",
+      "spot": 1.085,
+      "strike": 1.08,
+      "tenor": 0.25,
+      "quantity": -500000.0,
+      "option_type": "PUT",
+      "portfolio_id": "FX-PORTFOLIO-01",
+      "booking_spot_rate": null,
+      "booking_vol_surface_version": null,
+      "booking_timestamp": null,
+      "initial_greeks": null,
+      "timestamp": "2026-05-07T07:59:33.203013"
+    },
+    {
+      "position_id": "TRADE-003",
+      "instrument": "USDJPY",
+      "spot": 149.5,
+      "strike": 150.0,
+      "tenor": 0.019230769230769232,
+      "quantity": 2000000.0,
+      "option_type": "CALL",
+      "portfolio_id": "FX-PORTFOLIO-01",
+      "booking_spot_rate": null,
+      "booking_vol_surface_version": null,
+      "booking_timestamp": null,
+      "initial_greeks": null,
+      "timestamp": "2026-05-07T07:59:33.203013"
+    },
+    {
+      "position_id": "TRADE-004",
+      "instrument": "GBPUSD",
+      "spot": 1.265,
+      "strike": 1.26,
+      "tenor": 0.5,
+      "quantity": 750000.0,
+      "option_type": "PUT",
+      "portfolio_id": "FX-PORTFOLIO-01",
+      "booking_spot_rate": null,
+      "booking_vol_surface_version": null,
+      "booking_timestamp": null,
+      "initial_greeks": null,
+      "timestamp": "2026-05-07T07:59:33.203013"
+    },
+    {
+      "position_id": "TRADE-005",
+      "instrument": "USDJPY",
+      "spot": 149.5,
+      "strike": 148.0,
+      "tenor": 0.08333333333333333,
+      "quantity": -1500000.0,
+      "option_type": "CALL",
+      "portfolio_id": "FX-PORTFOLIO-01",
+      "booking_spot_rate": null,
+      "booking_vol_surface_version": null,
+      "booking_timestamp": null,
+      "initial_greeks": null,
+      "timestamp": "2026-05-07T07:59:33.203013"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "portfolio_id": "FX-PORTFOLIO-01",
+  "timestamp": "2026-05-07T07:57:48.274713",
+  "vol_surface_version": "0.1.0",
+  "total_greeks": {
+    "delta": 498464.03040652216,
+    "gamma": 14272125.097106759,
+    "vega": 1249.5279127732817,
+    "theta": -255.89958241550198,
+    "rho": 441.5936136936815,
+    "vanna": null,
+    "volga": null
+  },
+  "position_greeks": {
+    "TRADE-001": {
+      "delta": 498464.03040652216,
+      "gamma": 14272125.097106759,
+      "vega": 1249.5279127732817,
+      "theta": -255.89958241550198,
+      "rho": 441.5936136936815,
+      "vanna": null,
+      "volga": null
+    }
+  }
+}

@@ -448,7 +448,7 @@ def create_mock_surface(
         base_date=base_date,
         tenors=tenors,
         strikes=strikes,
-        volatilities=vols,
+        volatilities=vols.tolist(),  # Convert numpy array to list of lists for pydantic compatibility
         source="mock",
         version="0.1.0"
     )

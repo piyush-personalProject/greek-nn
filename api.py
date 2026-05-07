@@ -387,8 +387,9 @@ def _create_demo_portfolio():
                 risk_free_rate=0.05
             )
             initial_greeks = initial_pg.position_greeks.get(pos_data["position_id"])
+            logger.info(f"Computed initial Greeks for {pos_data['position_id']}: delta={initial_greeks.delta if initial_greeks else 'None'}")
         except Exception as e:
-            logger.warning(f"Failed to compute initial Greeks for {pos_data['position_id']}: {e}")
+            logger.error(f"Failed to compute initial Greeks for {pos_data['position_id']}: {e}", exc_info=True)
         
         positions.append(PortfolioPosition(
             position_id=pos_data["position_id"],
@@ -480,11 +481,39 @@ async def list_portfolios():
 
 @app.get("/api/portfolios/{portfolio_id}")
 async def get_portfolio(portfolio_id: str):
-    """Get portfolio details."""
+    """Get portfolio details with current Greeks."""
+    global forex_service, _current_spot_rates
+    
     if portfolio_id not in _portfolios:
         raise HTTPException(status_code=404, detail="Portfolio not found")
     
     portfolio = _portfolios[portfolio_id]
+    vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+    
+    # Fetch live spot rates for current Greeks calculation
+    if forex_service is not None and config.enable_live_spot_rates:
+        try:
+            live_rates = await forex_service.fetch_rates()
+            if live_rates:
+                _current_spot_rates.update(live_rates)
+                logger.debug(f"Updated spot rates with live data: {len(live_rates)} pairs")
+        except Exception as e:
+            logger.warning(f"Failed to fetch live spot rates: {e}")
+    
+    # Compute current Greeks for all positions using latest spot rates
+    try:
+        portfolio_greeks = risk_engine.compute_portfolio_greeks(
+            portfolio=portfolio,
+            vol_surface=vol_surface,
+            spot_rates=_current_spot_rates,
+            risk_free_rate=0.05
+        )
+        current_greeks_map = portfolio_greeks.position_greeks
+        logger.info(f"Computed current Greeks for portfolio {portfolio_id}: positions={len(current_greeks_map)}")
+    except Exception as e:
+        logger.warning(f"Failed to compute current Greeks: {e}")
+        current_greeks_map = {}
+    
     return {
         "portfolio_id": portfolio.portfolio_id,
         "timestamp": portfolio.timestamp.isoformat(),
@@ -492,11 +521,69 @@ async def get_portfolio(portfolio_id: str):
         "positions": [
             {
                 **p.model_dump(),
-                "timestamp": portfolio.timestamp.isoformat()
+                "timestamp": portfolio.timestamp.isoformat(),
+                "current_greeks": current_greeks_map.get(p.position_id).to_dict() if p.position_id in current_greeks_map else None
             }
             for p in portfolio.positions
         ]
     }
+
+
+@app.get("/api/portfolios/{portfolio_id}/greeks")
+async def get_portfolio_greeks(
+    portfolio_id: str,
+    vol_surface_version: Optional[str] = None
+):
+    """Get current Greeks for a portfolio (spot horizon view)."""
+    global forex_service, _current_spot_rates
+    from logger import get_tracer, get_span_id
+    
+    with get_tracer().start_span("get_greeks", portfolio_id=portfolio_id) as span:
+        if portfolio_id not in _portfolios:
+            span.log("Portfolio not found")
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        
+        portfolio = _portfolios[portfolio_id]
+        vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        # Fetch live spot rates for current Greeks calculation
+        if forex_service is not None and config.enable_live_spot_rates:
+            try:
+                live_rates = await forex_service.fetch_rates()
+                if live_rates:
+                    _current_spot_rates.update(live_rates)
+                    span.log(f"Updated spot rates with live data: {len(live_rates)} pairs")
+            except Exception as e:
+                logger.warning(f"Failed to fetch live spot rates: {e}")
+        
+        span.log(f"Getting greeks for {len(portfolio.positions)} positions")
+        
+        try:
+            portfolio_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=vol_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            span.log(f"Greeks computed successfully", level=20, 
+                     total_delta=portfolio_greeks.total_greeks.delta,
+                     total_vega=portfolio_greeks.total_greeks.vega)
+            
+            return {
+                "portfolio_id": portfolio_greeks.portfolio_id,
+                "timestamp": portfolio_greeks.timestamp.isoformat(),
+                "vol_surface_version": portfolio_greeks.vol_surface_version,
+                "total_greeks": portfolio_greeks.total_greeks.to_dict(),
+                "position_greeks": {
+                    pos_id: g.to_dict() 
+                    for pos_id, g in portfolio_greeks.position_greeks.items()
+                }
+            }
+        except Exception as e:
+            span.log(f"Failed to compute Greeks: {e}", level=40)
+            logger.error(f"Failed to compute Greeks: {e}", extra_fields={"portfolio_id": portfolio_id})
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/portfolios/{portfolio_id}/greeks")
@@ -505,6 +592,7 @@ async def compute_portfolio_greeks(
     vol_surface_version: Optional[str] = None
 ):
     """Compute Greeks for a portfolio (spot horizon view)."""
+    global forex_service, _current_spot_rates
     from logger import get_tracer, get_span_id
     
     with get_tracer().start_span("compute_greeks", portfolio_id=portfolio_id) as span:
@@ -514,6 +602,16 @@ async def compute_portfolio_greeks(
         
         portfolio = _portfolios[portfolio_id]
         vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        # Fetch live spot rates for current Greeks calculation
+        if forex_service is not None and config.enable_live_spot_rates:
+            try:
+                live_rates = await forex_service.fetch_rates()
+                if live_rates:
+                    _current_spot_rates.update(live_rates)
+                    span.log(f"Updated spot rates with live data: {len(live_rates)} pairs")
+            except Exception as e:
+                logger.warning(f"Failed to fetch live spot rates: {e}")
         
         span.log(f"Computing greeks for {len(portfolio.positions)} positions")
         
@@ -577,6 +675,7 @@ async def compute_impacted_greeks(
         weights will be computed dynamically using GreeksImpactWeights.compute_dynamic_weights()
         based on news characteristics and spot rate movement.
     """
+    global forex_service, _current_spot_rates
     from logger import get_tracer
     
     with get_tracer().start_span("compute_impacted_greeks", portfolio_id=portfolio_id) as span:
@@ -591,6 +690,16 @@ async def compute_impacted_greeks(
         
         portfolio = _portfolios[portfolio_id]
         base_vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        # Fetch live spot rates for current Greeks calculation
+        if forex_service is not None and config.enable_live_spot_rates:
+            try:
+                live_rates = await forex_service.fetch_rates()
+                if live_rates:
+                    _current_spot_rates.update(live_rates)
+                    span.log(f"Updated spot rates with live data: {len(live_rates)} pairs")
+            except Exception as e:
+                logger.warning(f"Failed to fetch live spot rates: {e}")
         
         # Dynamic weight computation if all params provided
         if news_importance is not None and news_sentiment_score is not None and spot_rate_change_pct is not None:
@@ -696,11 +805,22 @@ async def get_time_ladder(
     greek_type: str = Query("vega", description="Greek type: delta, gamma, vega, theta, rho")
 ):
     """Get time ladder view (Greeks bucketed by tenor)."""
+    global forex_service, _current_spot_rates
+    
     if portfolio_id not in _portfolios:
         raise HTTPException(status_code=404, detail="Portfolio not found")
     
     portfolio = _portfolios[portfolio_id]
     vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+    
+    # Fetch live spot rates for current Greeks calculation
+    if forex_service is not None and config.enable_live_spot_rates:
+        try:
+            live_rates = await forex_service.fetch_rates()
+            if live_rates:
+                _current_spot_rates.update(live_rates)
+        except Exception as e:
+            logger.warning(f"Failed to fetch live spot rates: {e}")
     
     # Group positions by tenor bucket
     tenor_buckets = {
@@ -1218,13 +1338,24 @@ async def get_vol_surface():
 @app.get("/api/risk-summary")
 async def get_risk_summary(portfolio_id: str = "FX-PORTFOLIO-01"):
     """Get comprehensive risk summary for dashboard."""
+    global forex_service, _current_spot_rates
+    
     if portfolio_id not in _portfolios:
         raise HTTPException(status_code=404, detail="Portfolio not found")
     
     portfolio = _portfolios[portfolio_id]
     vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
     
-    # Compute full portfolio Greeks
+    # Fetch live spot rates for current Greeks calculation
+    if forex_service is not None and config.enable_live_spot_rates:
+        try:
+            live_rates = await forex_service.fetch_rates()
+            if live_rates:
+                _current_spot_rates.update(live_rates)
+        except Exception as e:
+            logger.warning(f"Failed to fetch live spot rates: {e}")
+    
+    # Compute full portfolio Greeks using latest spot rates
     portfolio_greeks = risk_engine.compute_portfolio_greeks(
         portfolio=portfolio,
         vol_surface=vol_surface,
@@ -1752,6 +1883,7 @@ async def websocket_greeks(websocket: WebSocket):
 
 async def _compute_current_risk_state() -> dict:
     """Compute current risk state for ticking display."""
+    global forex_service, _current_spot_rates
     portfolio_id = "FX-PORTFOLIO-01"
     
     if portfolio_id not in _portfolios:
@@ -1759,6 +1891,15 @@ async def _compute_current_risk_state() -> dict:
     
     portfolio = _portfolios[portfolio_id]
     vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+    
+    # Fetch live spot rates for current Greeks calculation
+    if forex_service is not None and config.enable_live_spot_rates:
+        try:
+            live_rates = await forex_service.fetch_rates()
+            if live_rates:
+                _current_spot_rates.update(live_rates)
+        except Exception as e:
+            logger.warning(f"Failed to fetch live spot rates: {e}")
     
     try:
         portfolio_greeks = risk_engine.compute_portfolio_greeks(
@@ -1978,3 +2119,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
