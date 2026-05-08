@@ -818,6 +818,9 @@ function drawGauge(gaugeId, normalizedValue) {
 }
 
 function updateGauges(impacts) {
+    // Filter out items with unknown event type
+    impacts = impacts.filter(item => item.event_type && item.event_type !== 'unknown');
+    
     // Calculate total impacts
     let totalVega = 0, totalDelta = 0, totalGamma = 0;
     
@@ -857,6 +860,9 @@ function initializeImpactChart(impacts) {
     if (impactChart) {
         impactChart.destroy();
     }
+    
+    // Filter out items with unknown event type
+    impacts = impacts.filter(item => item.event_type && item.event_type !== 'unknown');
     
     const labels = impacts.map((item, i) => `N${i + 1}`);
     const vegaData = impacts.map(item => item.greeks_impact?.vega || 0);
@@ -927,6 +933,9 @@ function initializeImpactChart(impacts) {
 function updateNewsImpactList(impacts) {
     const container = document.getElementById('newsImpactList');
     container.innerHTML = '';
+    
+    // Filter out items with unknown event type
+    impacts = impacts.filter(item => item.event_type && item.event_type !== 'unknown');
     
     if (!impacts || impacts.length === 0) {
         container.innerHTML = '<div class="news-empty">No news impact data available (filtered by sentiment score)</div>';

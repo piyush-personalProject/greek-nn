@@ -517,18 +517,24 @@ async def get_portfolio(portfolio_id: str):
         logger.warning(f"Failed to compute current Greeks: {e}")
         current_greeks_map = {}
     
+    # Build response positions with current spot rates
+    positions_response = []
+    for p in portfolio.positions:
+        pos_dict = p.model_dump()
+        # Update spot with current market rate for UI display
+        current_spot = _current_spot_rates.get(p.instrument, p.spot)
+        pos_dict["spot"] = current_spot
+        positions_response.append({
+            **pos_dict,
+            "timestamp": portfolio.timestamp.isoformat(),
+            "current_greeks": current_greeks_map.get(p.position_id).to_dict() if p.position_id in current_greeks_map else None
+        })
+
     return {
         "portfolio_id": portfolio.portfolio_id,
         "timestamp": portfolio.timestamp.isoformat(),
         "base_currency": portfolio.base_currency,
-        "positions": [
-            {
-                **p.model_dump(),
-                "timestamp": portfolio.timestamp.isoformat(),
-                "current_greeks": current_greeks_map.get(p.position_id).to_dict() if p.position_id in current_greeks_map else None
-            }
-            for p in portfolio.positions
-        ]
+        "positions": positions_response
     }
 
 
