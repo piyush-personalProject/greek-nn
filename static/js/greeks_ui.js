@@ -22,6 +22,8 @@ let newsPollInterval = null;
 let spotRatesPollInterval = null;
 let alertsPollInterval = null;
 let currentAlerts = { spot_alerts: [], risk_alerts: [] };
+let currentNewsFilter = 'portfolio';  // Default filter for news relevance
+let isLoading = false;  // Loading state for async operations
 
 // Polling intervals (in milliseconds)
 const NEWS_POLL_INTERVAL = 60000; // 60 seconds
@@ -394,7 +396,98 @@ function switchTab(tab) {
     console.log('Switched to tab:', tab);
 }
 
+function onNewsFilterChange() {
+    const filterSelect = document.getElementById('newsFilterSelect');
+    if (filterSelect) {
+        currentNewsFilter = filterSelect.value;
+        console.log('News filter changed to:', currentNewsFilter);
+        
+        // Show loading overlay and disable interaction
+        showLoading();
+        
+        // Reload news with new filter
+        currentImpactData = null;  // Clear cache to force reload
+        loadNewsWithImpact();
+    }
+}
+
+// ==================== Loading Overlay ====================
+
+function showLoading() {
+    isLoading = true;
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        overlay.classList.add('active');
+    }
+    // Disable interactive elements
+    disableInteractiveElements(true);
+}
+
+function hideLoading() {
+    isLoading = false;
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        overlay.classList.remove('active');
+    }
+    // Re-enable interactive elements
+    disableInteractiveElements(false);
+}
+
+function disableInteractiveElements(disable) {
+    // Disable buttons and selects during loading
+    const buttons = document.querySelectorAll('button');
+    const selects = document.querySelectorAll('select');
+    const inputs = document.querySelectorAll('input');
+    
+    buttons.forEach(btn => {
+        if (disable) {
+            btn.dataset.originalDisabled = btn.disabled;
+            btn.disabled = true;
+        } else {
+            btn.disabled = btn.dataset.originalDisabled === 'true';
+        }
+    });
+    
+    selects.forEach(select => {
+        select.disabled = disable;
+    });
+    
+    inputs.forEach(input => {
+        if (disable) {
+            input.dataset.originalDisabled = input.disabled;
+            input.disabled = true;
+        } else {
+            input.disabled = input.dataset.originalDisabled === 'true';
+        }
+    });
+}
+
 // ==================== Spot Rates Polling ====================
+
+function startAutoPolling() {
+    console.log('Starting auto polling for news with impact...');
+    
+    // Start news with impact polling
+    newsPollInterval = setInterval(() => {
+        // Only load if we're on the news tab or data is stale
+        if (activeTab === 'news' || !currentImpactData) {
+            loadNewsWithImpact();
+        }
+    }, NEWS_POLL_INTERVAL);
+    
+    // Initial load
+    if (activeTab === 'news') {
+        loadNewsWithImpact();
+    }
+    
+    // Start combined impact polling for the baseline comparison
+    setInterval(() => {
+        loadCombinedImpact();
+    }, IMPACT_POLL_INTERVAL);
+    
+    // Initial load of combined impact
+    loadCombinedImpact();
+}
 
 function startSpotRatesPolling() {
     console.log('Starting spot rates polling...');
@@ -697,13 +790,14 @@ function updateSpotChangesDisplay(changes) {
 
 async function loadNewsWithImpact() {
     try {
-        console.log('Fetching news with impact from /api/news-with-impact...');
-        const response = await fetch('/api/news-with-impact?max_results=10');
+        console.log('Fetching news with impact from /api/news-with-impact...filter=' + currentNewsFilter);
+        const response = await fetch(`/api/news-with-impact?max_results=10&filter=${currentNewsFilter}`);
         console.log('News with impact response status:', response.status);
         
         if (!response.ok) {
             const errorText = await response.text();
             console.error('News with impact API error:', response.status, errorText);
+            hideLoading();  // Hide loading on error too
             return;
         }
         
@@ -725,8 +819,12 @@ async function loadNewsWithImpact() {
         
         updateNewsImpactList(data.news_impacts);
         
+        // Hide loading overlay after data is processed
+        hideLoading();
+        
     } catch (error) {
         console.error('Failed to load news with impact:', error);
+        hideLoading();  // Hide loading on error too
     }
 }
 
@@ -861,7 +959,7 @@ function initializeImpactChart(impacts) {
         impactChart.destroy();
     }
     
-    // Filter out items with unknown event type
+    // Filter out items with unknown event type for chart
     impacts = impacts.filter(item => item.event_type && item.event_type !== 'unknown');
     
     const labels = impacts.map((item, i) => `N${i + 1}`);
@@ -934,10 +1032,10 @@ function updateNewsImpactList(impacts) {
     const container = document.getElementById('newsImpactList');
     container.innerHTML = '';
     
-    // Filter out items with unknown event type
-    impacts = impacts.filter(item => item.event_type && item.event_type !== 'unknown');
+    // Store impacts locally for exclusion tracking
+    let displayImpacts = impacts || [];
     
-    if (!impacts || impacts.length === 0) {
+    if (!displayImpacts || displayImpacts.length === 0) {
         container.innerHTML = '<div class="news-empty">No news impact data available (filtered by sentiment score)</div>';
         // Update summary metrics
         const activeCountEl = document.getElementById('activeNewsCount');
@@ -950,7 +1048,7 @@ function updateNewsImpactList(impacts) {
     // Update summary metrics
     const activeCountEl = document.getElementById('activeNewsCount');
     const totalImpactEl = document.getElementById('totalImpact');
-    if (activeCountEl) activeCountEl.textContent = impacts.length;
+    if (activeCountEl) activeCountEl.textContent = displayImpacts.length;
     
     // Calculate total impact (sum of absolute vega impacts)
     let totalImpact = 0;
@@ -972,6 +1070,13 @@ function updateNewsImpactList(impacts) {
         };
         traceIdEl.style.cursor = 'pointer';
         traceIdEl.style.display = 'inline';
+    }
+    
+    // Show portfolio pairs info if filter was applied
+    const filterAppliedEl = document.getElementById('filterAppliedInfo');
+    if (filterAppliedEl && currentImpactData && currentImpactData.portfolio_pairs) {
+        filterAppliedEl.textContent = `Filtering for: ${currentImpactData.portfolio_pairs.join(', ')}`;
+        filterAppliedEl.style.display = 'inline';
     }
     
     // Update gauges with total impact
@@ -1004,7 +1109,7 @@ function updateNewsImpactList(impacts) {
                 <span class="news-time">${publishedDate}</span>
                 <span class="event-type-badge ${eventTypeBadge}">${eventTypeBadge}</span>
                 <span class="sentiment-badge ${sentimentClass}">${item.sentiment || 'neutral'}</span>
-                <button class="remove-news-btn" onclick="removeNews('${item.headline.replace(/'/g, "\\'")}')" title="Remove this news">×</button>
+                <button class="remove-news-btn" onclick="removeNews('${item.headline.replace(/'/g, "\\'")}', event)" title="Remove this news">×</button>
             </div>
             <div class="news-headline">${item.headline || ''}</div>
             <div class="news-impact-details">
@@ -1503,8 +1608,27 @@ function getTenorLabel(tenor) {
 
 // ==================== News Removal and Recomputation ====================
 
-function removeNews(headline) {
+function removeNews(headline, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
     console.log('Removing news:', headline);
+    
+    // Immediately remove from displayed list for responsive UI
+    const container = document.getElementById('newsImpactList');
+    if (container) {
+        const items = container.querySelectorAll('.news-impact-item');
+        items.forEach(item => {
+            const itemHeadline = item.querySelector('.news-headline')?.textContent;
+            if (itemHeadline === headline) {
+                item.style.opacity = '0';
+                item.style.transform = 'translateX(100%)';
+                setTimeout(() => item.remove(), 300);
+            }
+        });
+    }
     
     // Add to excluded list
     if (!excludedHeadlines.includes(headline)) {
@@ -1585,6 +1709,9 @@ async function recomputeGreeksWithExclusions() {
         // Update active news count
         const activeCountEl = document.getElementById('activeNewsCount');
         if (activeCountEl) activeCountEl.textContent = data.included_count || 0;
+        
+        // Refresh main Greeks display to ensure consistency
+        loadGreeks();
         
     } catch (error) {
         console.error('Failed to recompute Greeks with exclusions:', error);

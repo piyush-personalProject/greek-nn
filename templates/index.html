@@ -183,6 +183,17 @@
                             <span class="metric-label">Total Impact</span>
                             <span class="metric-value" id="totalImpact">--</span>
                         </div>
+                        <div class="summary-metric">
+                            <label>News Filter:</label>
+                            <select id="newsFilterSelect" onchange="onNewsFilterChange()">
+                                <option value="all">All News</option>
+                                <option value="portfolio" selected>Portfolio Pairs Only</option>
+                                <option value="relevant">Most Relevant</option>
+                            </select>
+                        </div>
+                        <div class="summary-metric">
+                            <span id="filterAppliedInfo" class="filter-info" style="display:none;font-size:11px;color:#94a3b8;"></span>
+                        </div>
                         <div class="summary-metric trace-id-metric">
                             <span class="metric-label">Trace ID</span>
                             <span class="metric-value trace-id" id="currentTraceId" style="display:none;">--</span>
@@ -303,6 +314,10 @@
         <!-- Risk Alerts -->
         <div class="alerts-container" id="alertsContainer">
             <!-- Alerts will appear here -->
+        </div>
+    <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loading-spinner"></div>
         </div>
     </div>
 

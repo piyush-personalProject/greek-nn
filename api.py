@@ -903,6 +903,47 @@ def _get_tenor_bucket(tenor: float) -> str:
         return "1Y"
 
 
+def _calculate_news_relevance(event_vector, portfolio_pairs: List[str], affected_pairs: List[str]) -> float:
+    """
+    Calculate relevance score for a news item based on:
+    - Importance of the news event
+    - Sentiment strength (absolute value)
+    - Number of portfolio pairs affected
+    
+    Score formula: importance * sentiment_strength * (1 + matched_pairs_count * 0.2)
+    
+    Args:
+        event_vector: Processed event vector from NLP engine
+        portfolio_pairs: List of currency pairs in the portfolio
+        affected_pairs: List of currency pairs affected by this news
+        
+    Returns:
+        Relevance score (0.0 to ~2.0+)
+    """
+    # Base importance (0-1)
+    importance = event_vector.importance
+    
+    # Sentiment strength (absolute value 0-1)
+    sentiment_strength = abs(event_vector.sentiment_score)
+    
+    # Count how many portfolio pairs are affected
+    matched_pairs = set(portfolio_pairs) & set(affected_pairs)
+    matched_count = len(matched_pairs)
+    
+    # Calculate relevance score
+    # More matched pairs = higher relevance, but with diminishing returns
+    pair_bonus = 1.0 + (matched_count * 0.25)
+    
+    # Base relevance: importance * sentiment_strength * pair_bonus
+    relevance = importance * sentiment_strength * pair_bonus
+    
+    # Add small boost for high importance news
+    if importance > 0.7:
+        relevance *= 1.2
+    
+    return relevance
+
+
 def _sum_ladder_greeks(ladder: List[dict]) -> dict:
     """Sum Greeks across all ladder entries."""
     totals = {"delta": 0, "gamma": 0, "vega": 0, "theta": 0, "rho": 0, "vanna": 0, "volga": 0}
@@ -1391,11 +1432,21 @@ async def get_risk_summary(portfolio_id: str = "FX-PORTFOLIO-01"):
 
 
 @app.get("/api/news")
-async def get_news(keyword: Optional[str] = None, max_results: int = 20):
-    """Get recent news headlines."""
+async def get_news(
+    keyword: Optional[str] = None,
+    max_results: int = 20,
+    filter: str = Query("all", description="Filter mode: 'all', 'portfolio' (only news affecting portfolio pairs), 'relevant' (high importance + portfolio pairs)")
+):
+    """Get recent news headlines.
+    
+    Args:
+        keyword: Optional keyword to filter by
+        max_results: Maximum number of headlines to return
+        filter: Filter mode - 'all' (default), 'portfolio' (only news affecting portfolio pairs), 'relevant' (high importance + portfolio pairs)
+    """
     from logger import get_tracer
     
-    with get_tracer().start_span("news_fetch", keyword=keyword, max_results=max_results) as span:
+    with get_tracer().start_span("news_fetch", keyword=keyword, max_results=max_results, filter=filter) as span:
         if news_service is None:
             logger.error("News service unavailable - not initialized")
             raise HTTPException(status_code=503, detail="News service not available")
@@ -1409,11 +1460,62 @@ async def get_news(keyword: Optional[str] = None, max_results: int = 20):
             else:
                 headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:max_results]
             
+            # Apply portfolio relevance filter
+            if filter in ("portfolio", "relevant"):
+                portfolio = _portfolios.get("FX-PORTFOLIO-01")
+                if portfolio and nlp_engine:
+                    # Get unique instruments from portfolio
+                    portfolio_pairs = list(set(p.instrument for p in portfolio.positions))
+                    span.log(f"Portfolio pairs: {portfolio_pairs}")
+                    
+                    # Filter headlines that affect portfolio pairs
+                    filtered_headlines = []
+                    for h in headlines:
+                        event_vector = nlp_engine.process_news_event(h)
+                        affected = nlp_engine.get_affected_pairs(event_vector)
+                        # Check if any affected pair matches portfolio pairs
+                        if any(pair in portfolio_pairs for pair in affected):
+                            # Add relevance metadata
+                            relevance_score = _calculate_news_relevance(event_vector, portfolio_pairs, affected)
+                            filtered_headlines.append({
+                                "headline": h,
+                                "relevance_score": relevance_score,
+                                "affected_pairs": affected
+                            })
+                    
+                    # Sort by relevance score if 'relevant' filter
+                    if filter == "relevant":
+                        filtered_headlines.sort(key=lambda x: x["relevance_score"], reverse=True)
+                    
+                    span.log(f"Filtered to {len(filtered_headlines)} news affecting portfolio pairs")
+                    
+                    return {
+                        "timestamp": datetime.now().isoformat(),
+                        "count": len(filtered_headlines),
+                        "filter_applied": filter,
+                        "portfolio_pairs": portfolio_pairs,
+                        "headlines": [
+                            {
+                                "headline": item["headline"].headline,
+                                "source": item["headline"].source,
+                                "url": item["headline"].url,
+                                "published_at": item["headline"].published_at.isoformat() if item["headline"].published_at else None,
+                                "content": item["headline"].content,
+                                "relevance_score": round(item["relevance_score"], 3),
+                                "affected_pairs": item["affected_pairs"]
+                            }
+                            for item in filtered_headlines
+                        ]
+                    }
+                else:
+                    span.log("No portfolio or NLP engine available for filtering")
+            
             span.log(f"Returning {len(headlines)} headlines")
             
             return {
                 "timestamp": datetime.now().isoformat(),
                 "count": len(headlines),
+                "filter_applied": filter,
                 "headlines": [
                     {
                         "headline": h.headline,
@@ -1434,7 +1536,8 @@ async def get_news(keyword: Optional[str] = None, max_results: int = 20):
 @app.get("/api/news-with-impact")
 async def get_news_with_impact(
     max_results: int = 10,
-    min_sentiment_score: float = Query(0.3, description="Minimum absolute sentiment score to include (0-1)")
+    min_sentiment_score: float = Query(0.3, description="Minimum absolute sentiment score to include (0-1)"),
+    filter: str = Query("all", description="Filter mode: 'all', 'portfolio' (only news affecting portfolio pairs), 'relevant' (high importance + portfolio pairs)")
 ):
     """
     Get news headlines WITH their Greeks impact - single call to avoid duplicate fetching.
@@ -1444,10 +1547,11 @@ async def get_news_with_impact(
         max_results: Maximum number of headlines to process
         min_sentiment_score: Minimum absolute sentiment score to include (default 0.3).
                            Only news with |sentiment_score| >= this value will be included.
+        filter: Filter mode - 'all' (default), 'portfolio' (only news affecting portfolio pairs), 'relevant' (high importance + portfolio pairs)
     """
     from logger import get_tracer
     
-    with get_tracer().start_span("news_with_impact", max_results=max_results) as span:
+    with get_tracer().start_span("news_with_impact", max_results=max_results, filter=filter) as span:
         global vol_shock_model
         
         if news_service is None:
@@ -1467,6 +1571,9 @@ async def get_news_with_impact(
             portfolio = _portfolios.get("FX-PORTFOLIO-01")
             if not portfolio:
                 raise HTTPException(status_code=404, detail="Portfolio not found")
+            
+            # Get portfolio pairs for filtering
+            portfolio_pairs = list(set(p.instrument for p in portfolio.positions))
             
             baseline_surface = _current_vol_surface or create_mock_surface(datetime.now())
             baseline_greeks = risk_engine.compute_portfolio_greeks(
@@ -1488,15 +1595,18 @@ async def get_news_with_impact(
             audit.begin_trace(trace_id)
 
             for h in headlines:
-                # Persist news event to audit trail
-                audit.persist_news_event(trace_id, h)
-
                 # Process through NLP
                 event_vector = nlp_engine.process_news_event(h)
-
-                # Persist event vector to audit trail
-                audit.persist_event_vector(trace_id, event_vector)
-
+                
+                # Get affected pairs
+                affected_pairs = nlp_engine.get_affected_pairs(event_vector)
+                
+                # Apply portfolio filter if needed
+                if filter in ("portfolio", "relevant"):
+                    # Check if any affected pair matches portfolio pairs
+                    if not any(pair in portfolio_pairs for pair in affected_pairs):
+                        continue  # Skip this news as it doesn't affect portfolio pairs
+                
                 # Predict vol shock
                 vol_shock = vol_shock_model.predict_shock(event_vector)
 
@@ -1561,8 +1671,17 @@ async def get_news_with_impact(
                     }
                 })
             
-            # Sort news by sentiment score (descending - strongest sentiment first)
-            impact_results = sorted(impact_results, key=lambda x: x["sentiment_score"], reverse=True)
+            # Sort news by relevance score if 'relevant' filter, otherwise by sentiment
+            if filter == "relevant":
+                # Calculate relevance score for each result
+                for r in impact_results:
+                    r["relevance_score"] = round(
+                        r["importance"] * abs(r["sentiment_score"]) * (1.0 + 0.25 * len(set(r["affected_pairs"]) & set(portfolio_pairs))),
+                        3
+                    )
+                impact_results = sorted(impact_results, key=lambda x: x.get("relevance_score", 0), reverse=True)
+            else:
+                impact_results = sorted(impact_results, key=lambda x: x["sentiment_score"], reverse=True)
             
             # Filter by minimum absolute sentiment score
             original_count = len(impact_results)
@@ -1575,7 +1694,8 @@ async def get_news_with_impact(
                 "trace_id": trace_id,
                 "count": len(impact_results),
                 "total_processed": original_count,
-                "filter_applied": min_sentiment_score,
+                "filter_applied": filter,
+                "portfolio_pairs": portfolio_pairs,
                 "baseline_greeks": baseline_greeks.total_greeks.to_dict(),
                 "news_impacts": impact_results
             }
