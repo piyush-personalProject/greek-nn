@@ -3,7 +3,7 @@
 Pydantic models and data classes for the risk system.
 """
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Any
 from datetime import datetime
 from enum import Enum
 import numpy as np
@@ -488,3 +488,70 @@ class CombinedImpactResponse(BaseModel):
     spot_impacts: List[SpotImpactData] = Field(default_factory=list)
     vol_shock_impacts: List[Dict] = Field(default_factory=list)
     combined_impact: Greeks
+
+
+# ==================== Risk Attribution Schemas ====================
+
+class RiskAttributionFactor(BaseModel):
+    """
+    Single factor contributing to a Greek risk change.
+    
+    Attributes:
+        factor_type: Type of attribution (e.g., "news_headline", "historical_vol_drift", "nn_model_adjustment")
+        source: Human-readable source of this factor (e.g., "ECB interest rate headline")
+        percentage: Percentage of total risk attributed to this factor (0-100)
+        description: Detailed description of how this factor contributed
+        evidence: Supporting evidence for this attribution
+    """
+    factor_type: str = Field(..., description="Type: news_headline, historical_vol_drift, nn_model_adjustment, spot_rate_movement")
+    source: str = Field(..., description="Source identifier or headline")
+    percentage: float = Field(..., ge=0.0, le=100.0, description="Attribution percentage (0-100)")
+    description: str = Field(..., description="How this factor contributed")
+    evidence: Dict[str, Any] = Field(default_factory=dict, description="Supporting metrics and data")
+
+
+class VegaSpikeAttribution(BaseModel):
+    """
+    Attribution breakdown for a Vega spike event.
+    
+    Example output:
+        "50% of this move is attributed to the ECB interest rate headline, 
+         30% to historical vol drift, and 20% to NN model adjustment."
+    """
+    vega_spike_amount: float = Field(..., description="Total vega change in dollars")
+    vega_spike_percentage: float = Field(..., description="Percentage change from baseline vega")
+    attribution_factors: List[RiskAttributionFactor] = Field(..., description="Individual attribution factors")
+    total_attributed_percentage: float = Field(..., description="Sum of all attributions (should be ~100)")
+    headline: str = Field(..., description="Primary news headline driving the spike")
+    event_type: str = Field(..., description="Type of event (e.g., INTEREST_RATE)")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When the spike was detected")
+
+
+class RiskAttributionReport(BaseModel):
+    """
+    Complete Risk Attribution Report for portfolio Greeks.
+    
+    Provides detailed breakdown of what drives Greek changes,
+    with explicit attribution percentages for each factor.
+    """
+    report_id: str = Field(..., description="Unique report identifier")
+    portfolio_id: str = Field(..., description="Portfolio this report is for")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Report generation time")
+    baseline_greeks: Greeks = Field(..., description="Greeks before any changes")
+    current_greeks: Greeks = Field(..., description="Current Greeks after changes")
+    greeks_delta: Greeks = Field(..., description="Change in Greeks (current - baseline)")
+    
+    # Attributions by Greek type
+    delta_attribution: List[RiskAttributionFactor] = Field(default_factory=list, description="Delta attribution factors")
+    gamma_attribution: List[RiskAttributionFactor] = Field(default_factory=list, description="Gamma attribution factors")
+    vega_attribution: List[RiskAttributionFactor] = Field(default_factory=list, description="Vega attribution factors")
+    theta_attribution: List[RiskAttributionFactor] = Field(default_factory=list, description="Theta attribution factors")
+    rho_attribution: List[RiskAttributionFactor] = Field(default_factory=list, description="Rho attribution factors")
+    
+    # Special Vega spike report
+    vega_spike_report: Optional[VegaSpikeAttribution] = Field(None, description="Vega spike attribution if applicable")
+    
+    # Summary
+    primary_driver: str = Field(..., description="The single biggest driver of Greek changes")
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence in attribution (0-1)")
+    trace_id: Optional[str] = Field(None, description="Audit trace ID for this report")

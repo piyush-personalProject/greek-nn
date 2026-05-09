@@ -2508,3 +2508,222 @@ body {
         margin-bottom: 6px;
     }
 }
+
+/* Risk Attribution Tab */
+.attribution-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.attribution-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.attribution-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.attribution-metric {
+    flex: 1;
+    min-width: 120px;
+}
+
+.attribution-metric .metric-label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.attribution-metric .metric-value {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.attribution-metric .trace-id {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 11px;
+}
+
+/* Vega Spike Alert */
+.vega-spike-alert {
+    margin: 12px 16px;
+    padding: 16px;
+    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(239, 68, 68, 0.1) 100%);
+    border-radius: 8px;
+    border-left: 4px solid var(--accent-red);
+}
+
+.vega-spike-alert .alert-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent-red);
+    margin-bottom: 8px;
+}
+
+.vega-spike-alert .spike-details {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.vega-spike-alert .spike-amount {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent-red);
+}
+
+.vega-spike-alert .spike-percentage {
+    font-size: 16px;
+    color: var(--text-secondary);
+    align-self: flex-end;
+    margin-bottom: 2px;
+}
+
+.vega-spike-alert .spike-headline {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Attribution Sections */
+.attribution-section {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.attribution-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.attribution-bar {
+    min-height: 60px;
+}
+
+.attribution-factors {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.attribution-factor {
+    background-color: var(--bg-secondary);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.factor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.factor-source {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.factor-percentage {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.factor-bar-bg {
+    height: 8px;
+    background-color: var(--bg-panel);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.factor-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.factor-description {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.attribution-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 16px;
+    text-align: center;
+}
+
+/* Attribution Greeks Comparison Table */
+.attribution-greeks-comparison {
+    padding: 12px 16px;
+}
+
+.attribution-greeks-comparison h4 {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.attribution-greeks-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.attribution-greeks-table th,
+.attribution-greeks-table td {
+    padding: 8px 12px;
+    text-align: right;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.attribution-greeks-table th {
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.attribution-greeks-table td:first-child {
+    text-align: left;
+    font-weight: 500;
+}
+
+.attribution-greeks-table .positive {
+    color: var(--accent-green);
+}
+
+.attribution-greeks-table .negative {
+    color: var(--accent-red);
+}
+
+/* Mobile Attribution */
+@media (max-width: 768px) {
+    .attribution-summary {
+        flex-direction: column;
+    }
+    
+    .attribution-metric {
+        min-width: 100%;
+    }
+    
+    .spike-details {
+        flex-direction: column;
+        gap: 4px;
+    }
+}

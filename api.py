@@ -23,8 +23,10 @@ from schemas import (
     NewsEvent, EventVector, GreeksImpactWeights,
     SpotRateResponse, SpotRateChange, SpotRateHistoryItem,
     SpotRateAlertData, RiskAlertData, AlertsResponse,
-    CombinedImpactRequest, CombinedImpactResponse, SpotImpactData
+    CombinedImpactRequest, CombinedImpactResponse, SpotImpactData,
+    RiskAttributionReport
 )
+from services.risk_attribution_service import get_attribution_service
 from nn_risk_engine import NNRiskEngine, BlackScholesGreeksCPU
 from vol_surface_service import VolSurfaceService, create_mock_surface
 from nlp_engine import NLPEngine
@@ -1984,6 +1986,200 @@ async def get_news_impact(max_results: int = 10):
         except Exception as e:
             span.log(f"Failed to compute news impact: {e}", level=40)
             logger.error(f"Failed to compute news impact: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Risk Attribution Report Endpoint ====================
+
+@app.get("/api/risk-attribution-report")
+async def get_risk_attribution_report(
+    portfolio_id: str = Query("FX-PORTFOLIO-01", description="Portfolio to generate report for"),
+    min_vega_spike: float = Query(10000, description="Minimum vega change to trigger spike report ($)")
+):
+    """
+    Generate Risk Attribution Report with explicit attribution percentages.
+    
+    This endpoint breaks down what drives Greek changes with explicit attribution:
+    - News Headlines: "50% of this move is attributed to the ECB interest rate headline"
+    - Historical Vol Drift: "30% to historical vol drift"  
+    - NN Model Adjustment: "20% to NN model adjustment"
+    
+    If a Vega spike of $10K+ is detected, a special VegaSpikeAttribution report is included.
+    
+    Args:
+        portfolio_id: Portfolio to analyze
+        min_vega_spike: Minimum vega change to trigger spike report (default $10K)
+    
+    Returns:
+        RiskAttributionReport with detailed attribution breakdown
+    """
+    from logger import get_tracer
+    
+    with get_tracer().start_span("risk_attribution_report", portfolio_id=portfolio_id) as span:
+        global nlp_engine, vol_shock_model, vol_surface_service, risk_engine
+        
+        if risk_engine is None:
+            raise HTTPException(status_code=503, detail="Risk engine not available")
+        
+        if vol_surface_service is None:
+            raise HTTPException(status_code=503, detail="Vol surface service not available")
+        
+        if portfolio_id not in _portfolios:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        
+        portfolio = _portfolios[portfolio_id]
+        base_vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        # Get NN model mode
+        nn_model_mode = risk_engine.model_mode
+        
+        try:
+            # 1. Compute baseline Greeks (before any news)
+            baseline_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=base_vol_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            # 2. Fetch latest news and process through NLP/Vol Shock
+            vol_shock = None
+            news_event = None
+            
+            if news_service and nlp_engine and vol_shock_model:
+                headlines = await news_service.fetch_all_headlines()
+                if headlines:
+                    # Get most impactful headline
+                    headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)
+                    top_headline = headlines[0]
+                    
+                    # Process through NLP
+                    news_event = nlp_engine.process_news_event(top_headline)
+                    
+                    # Predict vol shock
+                    vol_shock = vol_shock_model.predict_shock(news_event)
+            
+            # 3. Compute current Greeks (with vol shock if available)
+            if vol_shock:
+                shocked_surface, _ = vol_surface_service.get_shocked_surface(
+                    base_vol_surface, vol_shock
+                )
+                current_greeks = risk_engine.compute_portfolio_greeks(
+                    portfolio=portfolio,
+                    vol_surface=shocked_surface,
+                    spot_rates=_current_spot_rates,
+                    risk_free_rate=0.05
+                )
+            else:
+                current_greeks = baseline_greeks
+            
+            # 4. Compute attribution report
+            attribution_service = get_attribution_service()
+            report = attribution_service.compute_attribution(
+                baseline_greeks=baseline_greeks.total_greeks,
+                current_greeks=current_greeks.total_greeks,
+                vol_shock=vol_shock,
+                news_event=news_event,
+                nn_model_mode=nn_model_mode
+            )
+            
+            span.log(
+                f"Risk attribution report generated",
+                vega_delta=report.greeks_delta.vega,
+                primary_driver=report.primary_driver
+            )
+            
+            # 5. Build response
+            response = {
+                "report_id": report.report_id,
+                "portfolio_id": report.portfolio_id,
+                "timestamp": report.timestamp.isoformat(),
+                "baseline_greeks": report.baseline_greeks.to_dict(),
+                "current_greeks": report.current_greeks.to_dict(),
+                "greeks_delta": report.greeks_delta.to_dict(),
+                "delta_attribution": [
+                    {
+                        "factor_type": f.factor_type,
+                        "source": f.source,
+                        "percentage": f.percentage,
+                        "description": f.description
+                    }
+                    for f in report.delta_attribution
+                ],
+                "gamma_attribution": [
+                    {
+                        "factor_type": f.factor_type,
+                        "source": f.source,
+                        "percentage": f.percentage,
+                        "description": f.description
+                    }
+                    for f in report.gamma_attribution
+                ],
+                "vega_attribution": [
+                    {
+                        "factor_type": f.factor_type,
+                        "source": f.source,
+                        "percentage": f.percentage,
+                        "description": f.description
+                    }
+                    for f in report.vega_attribution
+                ],
+                "theta_attribution": [
+                    {
+                        "factor_type": f.factor_type,
+                        "source": f.source,
+                        "percentage": f.percentage,
+                        "description": f.description
+                    }
+                    for f in report.theta_attribution
+                ],
+                "rho_attribution": [
+                    {
+                        "factor_type": f.factor_type,
+                        "source": f.source,
+                        "percentage": f.percentage,
+                        "description": f.description
+                    }
+                    for f in report.rho_attribution
+                ],
+                "primary_driver": report.primary_driver,
+                "confidence_score": report.confidence_score
+            }
+            
+            # 6. Include Vega spike report if applicable
+            if report.vega_spike_report and abs(report.vega_spike_report.vega_spike_amount) >= min_vega_spike:
+                # Build human-readable attribution summary
+                attribution_parts = []
+                for factor in report.vega_spike_report.attribution_factors:
+                    attribution_parts.append(
+                        f"{factor.percentage}% of this move is attributed to {factor.source}"
+                    )
+                
+                attribution_summary = ", ".join(attribution_parts)
+                
+                response["vega_spike_report"] = {
+                    "vega_spike_amount": report.vega_spike_report.vega_spike_amount,
+                    "vega_spike_percentage": report.vega_spike_report.vega_spike_percentage,
+                    "headline": report.vega_spike_report.headline,
+                    "event_type": report.vega_spike_report.event_type,
+                    "attribution_factors": [
+                        {
+                            "factor_type": f.factor_type,
+                            "source": f.source,
+                            "percentage": f.percentage,
+                            "description": f.description
+                        }
+                        for f in report.vega_spike_report.attribution_factors
+                    ],
+                    "total_attributed_percentage": report.vega_spike_report.total_attributed_percentage,
+                    "attribution_summary": attribution_summary
+                }
+            
+            return response
+            
+        except Exception as e:
+            span.log(f"Failed to generate risk attribution report: {e}", level=40)
+            logger.error(f"Failed to generate risk attribution report: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
 

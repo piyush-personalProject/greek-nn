@@ -119,6 +119,7 @@
                         <button class="tab-btn active" data-tab="ladder">Time Ladder</button>
                         <button class="tab-btn" data-tab="news">News Impact</button>
                         <button class="tab-btn" data-tab="alerts">Alerts <span id="spotAlertBadge" class="alert-badge" style="display:none">0</span></button>
+                        <button class="tab-btn" data-tab="attribution">Risk Attribution</button>
                     </div>
                     <div class="greek-selector" id="ladderGreekSelector">
                         <label>Greek:</label>
@@ -243,6 +244,92 @@
                     </div>
                     <div class="alerts-list" id="alertsList">
                         <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Risk Attribution View -->
+                <div class="tab-content" id="tab-attribution">
+                    <div class="attribution-header">
+                        <h3>Risk Attribution Report</h3>
+                        <button class="btn btn-small" id="refreshAttributionBtn" onclick="loadRiskAttribution()">Refresh</button>
+                    </div>
+                    <div class="attribution-summary">
+                        <div class="attribution-metric">
+                            <span class="metric-label">Primary Driver</span>
+                            <span class="metric-value" id="primaryDriver">--</span>
+                        </div>
+                        <div class="attribution-metric">
+                            <span class="metric-label">Confidence</span>
+                            <span class="metric-value" id="confidenceScore">--</span>
+                        </div>
+                        <div class="attribution-metric">
+                            <span class="metric-label">Report ID</span>
+                            <span class="metric-value trace-id" id="attributionReportId">--</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Vega Spike Alert (shown when triggered) -->
+                    <div class="vega-spike-alert" id="vegaSpikeAlert" style="display:none;">
+                        <div class="alert-title">Vega Spike Detected</div>
+                        <div class="spike-details">
+                            <span class="spike-amount" id="vegaSpikeAmount">--</span>
+                            <span class="spike-percentage" id="vegaSpikePercentage">--</span>
+                        </div>
+                        <div class="spike-headline" id="vegaSpikeHeadline"></div>
+                    </div>
+                    
+                    <!-- Greeks Delta Attribution -->
+                    <div class="attribution-section">
+                        <h4>Delta Attribution</h4>
+                        <div class="attribution-bar" id="deltaAttribution">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <div class="attribution-section">
+                        <h4>Gamma Attribution</h4>
+                        <div class="attribution-bar" id="gammaAttribution">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <div class="attribution-section">
+                        <h4>Vega Attribution</h4>
+                        <div class="attribution-bar" id="vegaAttribution">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <div class="attribution-section">
+                        <h4>Theta Attribution</h4>
+                        <div class="attribution-bar" id="thetaAttribution">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <div class="attribution-section">
+                        <h4>Rho Attribution</h4>
+                        <div class="attribution-bar" id="rhoAttribution">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- Greeks Comparison -->
+                    <div class="attribution-greeks-comparison">
+                        <h4>Baseline vs Current Greeks</h4>
+                        <table class="attribution-greeks-table">
+                            <thead>
+                                <tr>
+                                    <th>Greek</th>
+                                    <th>Baseline</th>
+                                    <th>Current</th>
+                                    <th>Delta</th>
+                                </tr>
+                            </thead>
+                            <tbody id="attributionGreeksBody">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </main>

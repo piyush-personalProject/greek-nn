@@ -24,6 +24,7 @@ let alertsPollInterval = null;
 let currentAlerts = { spot_alerts: [], risk_alerts: [] };
 let currentNewsFilter = 'portfolio';  // Default filter for news relevance
 let isLoading = false;  // Loading state for async operations
+let currentAttributionData = null;
 
 // Polling intervals (in milliseconds)
 const NEWS_POLL_INTERVAL = 60000; // 60 seconds
@@ -242,6 +243,7 @@ function initializeEventListeners() {
 
 async function loadInitialData() {
     console.log('loadInitialData started');
+    showLoading();  // Show loader until all data is loaded
     try {
         await Promise.all([
             loadGreeks(),
@@ -253,6 +255,8 @@ async function loadInitialData() {
         console.log('loadInitialData completed');
     } catch (error) {
         console.error('loadInitialData error:', error);
+    } finally {
+        hideLoading();  // Hide loader when done (success or error)
     }
 }
 
@@ -390,6 +394,13 @@ function switchTab(tab) {
         } else {
             // Data already loaded, just update the display
             updateNewsImpactList(currentImpactData.news_impacts);
+        }
+    }
+    
+    // If switching to attribution tab, ensure data is loaded
+    if (tab === 'attribution') {
+        if (!currentAttributionData) {
+            loadRiskAttribution();
         }
     }
     
@@ -1729,4 +1740,119 @@ function resetExcludedNews() {
     // Hide reset button
     const resetBtn = document.getElementById('resetNewsBtn');
     if (resetBtn) resetBtn.style.display = 'none';
+}
+
+// Risk Attribution functions
+
+async function loadRiskAttribution() {
+    try {
+        showLoading();
+        
+        const response = await fetch('/api/risk-attribution-report?portfolio_id=FX-PORTFOLIO-01&min_vega_spike=10000');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        currentAttributionData = data;
+        
+        // Update summary metrics
+        document.getElementById('primaryDriver').textContent = data.primary_driver || '--';
+        document.getElementById('confidenceScore').textContent = data.confidence_score ? `${(data.confidence_score * 100).toFixed(0)}%` : '--';
+        document.getElementById('attributionReportId').textContent = data.report_id || '--';
+        
+        // Update Greeks comparison table
+        updateAttributionGreeksTable(data.baseline_greeks, data.current_greeks, data.greeks_delta);
+        
+        // Update each Greek's attribution bars
+        updateAttributionBar('deltaAttribution', data.delta_attribution);
+        updateAttributionBar('gammaAttribution', data.gamma_attribution);
+        updateAttributionBar('vegaAttribution', data.vega_attribution);
+        updateAttributionBar('thetaAttribution', data.theta_attribution);
+        updateAttributionBar('rhoAttribution', data.rho_attribution);
+        
+        // Check for vega spike
+        if (data.vega_spike_report) {
+            showVegaSpikeAlert(data.vega_spike_report);
+        } else {
+            document.getElementById('vegaSpikeAlert').style.display = 'none';
+        }
+        
+        hideLoading();
+    } catch (error) {
+        console.error('Failed to load risk attribution:', error);
+        hideLoading();
+        showAlert('error', 'Error', 'Failed to load risk attribution report');
+    }
+}
+
+function showVegaSpikeAlert(spikeData) {
+    const alertEl = document.getElementById('vegaSpikeAlert');
+    const amountEl = document.getElementById('vegaSpikeAmount');
+    const percentageEl = document.getElementById('vegaSpikePercentage');
+    const headlineEl = document.getElementById('vegaSpikeHeadline');
+    
+    if (alertEl) {
+        alertEl.style.display = 'block';
+        if (amountEl) amountEl.textContent = `$${formatNumber(spikeData.vega_spike_amount, 0)}`;
+        if (percentageEl) percentageEl.textContent = `${spikeData.vega_spike_percentage.toFixed(1)}%`;
+        if (headlineEl) headlineEl.textContent = spikeData.headline || '';
+    }
+}
+
+function updateAttributionGreeksTable(baseline, current, delta) {
+    const tbody = document.getElementById('attributionGreeksBody');
+    if (!tbody) return;
+    
+    const greeks = ['delta', 'gamma', 'vega', 'theta', 'rho'];
+    let html = '';
+    
+    greeks.forEach(greek => {
+        const baseVal = baseline ? baseline[greek] || 0 : 0;
+        const currVal = current ? current[greek] || 0 : 0;
+        const deltaVal = delta ? delta[greek] || 0 : 0;
+        
+        html += `<tr>
+            <td>${greek.charAt(0).toUpperCase() + greek.slice(1)}</td>
+            <td>${formatNumber(baseVal, 4)}</td>
+            <td>${formatNumber(currVal, 4)}</td>
+            <td class="${deltaVal > 0 ? 'positive' : deltaVal < 0 ? 'negative' : ''}">${deltaVal > 0 ? '+' : ''}${formatNumber(deltaVal, 4)}</td>
+        </tr>`;
+    });
+    
+    tbody.innerHTML = html;
+}
+
+function updateAttributionBar(containerId, attributionFactors) {
+    const container = document.getElementById(containerId);
+    if (!container || !attributionFactors || attributionFactors.length === 0) {
+        if (container) container.innerHTML = '<div class="attribution-empty">No attribution data</div>';
+        return;
+    }
+    
+    let html = '<div class="attribution-factors">';
+    const colors = {
+        'News': '#3b82f6',
+        'Historical Vol Drift': '#f59e0b',
+        'NN Model Adjustment': '#a855f7'
+    };
+    
+    attributionFactors.forEach(factor => {
+        const color = colors[factor.source] || '#6b7280';
+        const width = factor.percentage;
+        
+        html += `<div class="attribution-factor">
+            <div class="factor-header">
+                <span class="factor-source" style="color:${color}">${factor.source}</span>
+                <span class="factor-percentage">${factor.percentage.toFixed(1)}%</span>
+            </div>
+            <div class="factor-bar-bg">
+                <div class="factor-bar-fill" style="width:${width}%;background-color:${color}"></div>
+            </div>
+            <div class="factor-description">${factor.description}</div>
+        </div>`;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
 }

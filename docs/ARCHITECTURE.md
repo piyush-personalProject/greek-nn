@@ -278,6 +278,23 @@ News Headline                    EventVector                    VolShock
   - `GET /api/audit/traces` - List recent traces
   - `POST /api/audit/trace/{trace_id}/end` - Mark trace as completed
 
+### Risk Attribution Service (`services/risk_attribution_service.py`)
+- **Status**: ✅ Implemented
+- **Responsibility**: Break down Greek changes into explicit attribution percentages
+- **Features**:
+  - News Headlines attribution (NLP → Vol Shock)
+  - Historical Vol Drift attribution (natural market movement)
+  - NN Model Adjustment attribution (neural network corrections)
+  - Vega spike detection ($10K+ threshold) with special report
+  - Primary driver identification
+  - Confidence scoring for attributions
+- **Attribution Model**:
+  - Event-type based weights (INTEREST_RATE: 55% news, 25% drift, 20% NN)
+  - Central bank specific sources (Fed, ECB, BoJ, etc.)
+  - Human-readable attribution summary
+- **API Endpoints**:
+  - `GET /api/risk-attribution-report` - Generate full attribution report
+
 ### API Server (`api.py`)
 - **File**: `api.py`
 - **Status**: ✅ Implemented
@@ -747,6 +764,7 @@ greek_nn/
 | GET | `/api/risk-summary` | Get dashboard risk summary |
 | GET | `/api/news` | Get recent news headlines |
 | GET | `/api/news-impact` | Get news with calculated impact on Greeks |
+| GET | `/api/risk-attribution-report` | Generate risk attribution report with explicit percentages |
 | POST | `/api/trades` | Create new trade |
 | DELETE | `/api/trades/{id}` | Delete trade |
 | WS | `/ws/greeks` | Real-time Greeks WebSocket |
@@ -990,6 +1008,127 @@ Surprise Factor: 0.4
 
 **Core Principle:** Negative news (e.g., recession fears) typically causes markets to expect calmer conditions → lower implied volatility → lower vega. Positive news (e.g., strong economic data) suggests higher market activity → higher implied vol → higher vega.
 
+## Risk Attribution Reports
+
+The system provides **Risk Attribution Reports** that explicitly break down what drives Greek changes with attribution percentages.
+
+### File: [`services/risk_attribution_service.py`](services/risk_attribution_service.py)
+
+### Attribution Model
+
+The attribution model breaks down Greek changes into three factors:
+
+| Factor | Description | Example |
+|--------|-------------|---------|
+| **News Headlines** | Attribution to specific news events (NLP → Vol Shock) | "50% of this move is attributed to the ECB interest rate headline" |
+| **Historical Vol Drift** | Natural market volatility changes not from news | "30% to historical vol drift" |
+| **NN Model Adjustment** | Neural network's learned adjustments beyond rule-based | "20% to NN model adjustment" |
+
+### Event-Type Based Attribution Weights
+
+Different event types have different attribution weightings:
+
+| Event Type | News Weight | Vol Drift Weight | NN Adjustment Weight |
+|------------|-------------|------------------|---------------------|
+| INTEREST_RATE | 55% | 25% | 20% |
+| INFLATION | 50% | 30% | 20% |
+| EMPLOYMENT | 45% | 35% | 20% |
+| CENTRAL_BANK | 50% | 30% | 20% |
+| MACRO | 40% | 40% | 20% |
+| UNKNOWN | 30% | 50% | 20% |
+
+### Vega Spike Detection
+
+When a Vega spike of $10K+ (5% change) is detected, a special `VegaSpikeAttribution` report is generated:
+
+```json
+{
+  "vega_spike_report": {
+    "vega_spike_amount": 10000,
+    "vega_spike_percentage": 10.5,
+    "headline": "ECB announces unexpected rate cut amid cooling inflation",
+    "event_type": "INTEREST_RATE",
+    "attribution_factors": [
+      {
+        "factor_type": "news_headline",
+        "source": "ECB interest rate headline",
+        "percentage": 50.0,
+        "description": "Vol spike driven by NEGATIVE sentiment news"
+      },
+      {
+        "factor_type": "historical_vol_drift",
+        "source": "historical vol drift",
+        "percentage": 30.0,
+        "description": "Market volatility adjustment not from news"
+      },
+      {
+        "factor_type": "nn_model_adjustment",
+        "source": "onnx model adjustment",
+        "percentage": 20.0,
+        "description": "NN model learned correction beyond rule-based"
+      }
+    ],
+    "total_attributed_percentage": 100.0,
+    "attribution_summary": "50% of this move is attributed to ECB interest rate headline, 30% to historical vol drift, and 20% to NN model adjustment"
+  }
+}
+```
+
+### API Endpoint
+
+**GET `/api/risk-attribution-report`**
+
+Returns a full `RiskAttributionReport` with:
+- Baseline and current Greeks
+- Attribution breakdown for each Greek (delta, gamma, vega, theta, rho)
+- Vega spike report when applicable
+- Primary driver identification
+- Confidence score
+
+### Usage Example
+
+```bash
+curl "http://localhost:8000/api/risk-attribution-report?portfolio_id=FX-PORTFOLIO-01&min_vega_spike=10000"
+```
+
+### Report Schema
+
+**File:** [`schemas.py`](schemas.py)
+
+```python
+class RiskAttributionReport(BaseModel):
+    """Complete Risk Attribution Report for portfolio Greeks."""
+    report_id: str
+    portfolio_id: str
+    timestamp: datetime
+    baseline_greeks: Greeks
+    current_greeks: Greeks
+    greeks_delta: Greeks
+    
+    # Attributions by Greek type
+    delta_attribution: List[RiskAttributionFactor]
+    gamma_attribution: List[RiskAttributionFactor]
+    vega_attribution: List[RiskAttributionFactor]
+    theta_attribution: List[RiskAttributionFactor]
+    rho_attribution: List[RiskAttributionFactor]
+    
+    # Special Vega spike report
+    vega_spike_report: Optional[VegaSpikeAttribution]
+    
+    primary_driver: str
+    confidence_score: float
+
+class VegaSpikeAttribution(BaseModel):
+    """Attribution breakdown for a Vega spike event."""
+    vega_spike_amount: float
+    vega_spike_percentage: float
+    attribution_factors: List[RiskAttributionFactor]
+    total_attributed_percentage: float
+    headline: str
+    event_type: str
+    timestamp: datetime
+```
+
 ## Version History
 
 | Version | Date | Changes |
@@ -1001,3 +1140,4 @@ Surprise Factor: 0.4
 | 2.2.0 | 2026-04 | Added news-based wireframes, use cases, and UI layouts |
 | 2.3.0 | 2026-05 | Added mobile-friendly UI, sort by category/sentiment, Greeks display at booking, spot movement alerts |
 | 2.4.0 | 2026-05 | Added Vega Impact Calculation section with detailed examples |
+| 2.5.0 | 2026-05 | Added Risk Attribution Report feature with explicit attribution percentages |
