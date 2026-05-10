@@ -491,6 +491,218 @@ class CombinedImpactResponse(BaseModel):
     combined_impact: Greeks
 
 
+# ==================== Correlation Schemas ====================
+
+class CorrelationMatrix(BaseModel):
+    """
+    FX Cross-Asset Correlation Matrix.
+    
+    Models the correlation between different currency pairs' returns.
+    Used to adjust portfolio Greeks for cross-asset correlation risk.
+    
+    Example:
+        EURUSD vs GBPUSD typically ~0.85 correlation
+        EURUSD vs USDJPY typically ~-0.65 correlation (negative - USD rescue)
+    """
+    matrix_id: str = Field(..., description="Unique matrix identifier")
+    base_date: datetime = Field(default_factory=datetime.now, description="Date this matrix is valid from")
+    pairs: List[str] = Field(..., description="Currency pairs in this matrix (ordered)")
+    correlations: Dict[Tuple[str, str], float] = Field(
+        default_factory=dict, 
+        description="Correlation matrix as dict of (pair1, pair2) -> correlation"
+    )
+    source: str = Field(default="forex_api", description="Source of correlation data")
+    version: str = Field(default="1.0", description="Matrix version")
+    
+    @classmethod
+    def create_identity(cls, pairs: List[str], matrix_id: str = None) -> "CorrelationMatrix":
+        """Create identity matrix for uncorrelated assets."""
+        matrix_id = matrix_id or f"identity-{datetime.now().strftime('%Y%m%d')}"
+        correlations = {}
+        for pair in pairs:
+            correlations[(pair, pair)] = 1.0
+        return cls(matrix_id=matrix_id, pairs=pairs, correlations=correlations)
+    
+    @classmethod
+    def create_from_dict(cls, pairs: List[str], corr_dict: Dict[Tuple[str, str], float], 
+                         matrix_id: str = None) -> "CorrelationMatrix":
+        """Create matrix from dictionary of correlations."""
+        matrix_id = matrix_id or f"custom-{datetime.now().strftime('%Y%m%d')}"
+        # Ensure matrix is symmetric
+        correlations = {}
+        for (p1, p2), corr in corr_dict.items():
+            correlations[(p1, p2)] = corr
+            correlations[(p2, p1)] = corr
+        return cls(matrix_id=matrix_id, pairs=pairs, correlations=correlations)
+    
+    def get_correlation(self, pair1: str, pair2: str) -> float:
+        """Get correlation between two pairs."""
+        if pair1 == pair2:
+            return 1.0
+        key = (pair1, pair2)
+        reverse_key = (pair2, pair1)
+        return self.correlations.get(key, self.correlations.get(reverse_key, 0.0))
+    
+    def is_positive_correlated(self, pair1: str, pair2: str) -> bool:
+        """Check if two pairs are positively correlated."""
+        return self.get_correlation(pair1, pair2) > 0.5
+    
+    def is_negative_correlated(self, pair1: str, pair2: str) -> bool:
+        """Check if two pairs are negatively correlated."""
+        return self.get_correlation(pair1, pair2) < -0.5
+
+
+class CorrelationAdjustedGreeks(BaseModel):
+    """
+    Greeks adjusted for cross-asset correlation.
+    
+    Shows how raw (uncorrelated) Greeks compare to correlation-adjusted
+    Greeks, highlighting the diversification benefit or concentration risk.
+    """
+    raw_greeks: Greeks = Field(..., description="Greeks without correlation adjustment")
+    adjusted_greeks: Greeks = Field(..., description="Greeks after correlation adjustment")
+    correlation_adjustment: Greeks = Field(..., description="Adjustment amount (adjusted - raw)")
+    diversification_benefit: Greeks = Field(..., description="Reduction from correlation (positive = risk reduced)")
+    correlation_matrix_id: str = Field(..., description="Matrix used for adjustment")
+    pairs_in_portfolio: List[str] = Field(..., description="Currency pairs in portfolio")
+
+
+class CorrelationStressTest(BaseModel):
+    """
+    Correlation stress test scenario.
+    
+    Allows testing what happens when correlations change - e.g., during
+    crisis periods where normally uncorrelated assets become correlated.
+    """
+    scenario_id: str = Field(..., description="Unique scenario identifier")
+    name: str = Field(..., description="Scenario name (e.g., '2008 Crisis', 'COVID March 2020')")
+    description: str = Field(..., description="Description of the scenario")
+    correlation_multipliers: Dict[Tuple[str, str], float] = Field(
+        default_factory=dict,
+        description="Multipliers to apply to correlations (pair1, pair2) -> multiplier"
+    )
+    # Multipliers > 1.0 increase correlation magnitude, < 1.0 decrease
+    # E.g., 2.0 means correlations become twice as strong (0.5 -> 1.0)
+
+
+class CorrelationStressResult(BaseModel):
+    """Result of a correlation stress test."""
+    scenario: CorrelationStressTest = Field(..., description="The scenario tested")
+    baseline_greeks: Greeks = Field(..., description="Greeks with current correlations")
+    stressed_greeks: Greeks = Field(..., description="Greeks with stressed correlations")
+    greeks_change: Greeks = Field(..., description="Change from baseline")
+    change_percentages: Greeks = Field(..., description="Percentage change from baseline")
+    highest_impact_pairs: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Pairs with highest correlation impact"
+    )
+
+
+class CorrelationRiskReport(BaseModel):
+    """
+    Comprehensive correlation risk report.
+    
+    Shows:
+    - Current portfolio correlation exposure
+    - Correlation-adjusted Greeks with diversification metrics
+    - Stress test results for crisis scenarios
+    """
+    report_id: str = Field(..., description="Unique report identifier")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Report generation time")
+    portfolio_id: str = Field(..., description="Portfolio this report is for")
+    correlation_matrix_id: str = Field(..., description="Matrix used for analysis")
+    
+    # Raw vs Adjusted
+    raw_total_greeks: Greeks = Field(..., description="Unadjusted portfolio Greeks")
+    adjusted_total_greeks: Greeks = Field(..., description="Correlation-adjusted Greeks")
+    diversification_ratio: float = Field(..., description="Ratio of adjusted/raw (lower = more diversification benefit)")
+    
+    # Key pairs analysis
+    highly_correlated_pairs: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Pairs with correlation > 0.7"
+    )
+    diversification_opportunities: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Pairs with correlation < 0.3 that could diversify"
+    )
+    
+    # Stress tests
+    stress_tests: List[CorrelationStressResult] = Field(
+        default_factory=list,
+        description="Results of correlation stress tests"
+    )
+    
+    # Attribution
+    correlation_attribution: List["RiskAttributionFactor"] = Field(
+        default_factory=list,
+        description="What portion of Greek changes comes from correlation effects"
+    )
+
+
+class NewsCorrelationImpact(BaseModel):
+    """
+    Records how a specific news event caused correlation changes.
+    
+    This provides full traceability from news headline to correlation impact:
+    - News headline that triggered the change
+    - URL link to the original article
+    - Event type (CENTRAL_BANK, MACRO, etc.)
+    - Sentiment at time of event
+    - Which currency pairs were affected
+    - Before/after correlation values
+    - Why the correlation changed (based on event type rules)
+    
+    Example:
+        headline: "ECB unexpectedly cuts rates by 25bp"
+        url: "https://www.reuters.com/..."
+        event_type: "CENTRAL_BANK"
+        sentiment: "negative"
+        affected_pairs: ["EURUSD", "EURGBP", "EURCHF"]
+        reason: "Central bank decisions cause EUR crosses to correlate more tightly"
+        pair_changes: [
+            {"pair": "EURUSD_GBPUSD", "old_corr": 0.85, "new_corr": 1.0, "change": 0.15},
+            ...
+        ]
+    """
+    headline: str = Field(..., description="News headline that triggered correlation change")
+    url: Optional[str] = Field(None, description="URL link to original news article")
+    event_type: str = Field(..., description="Event type (CENTRAL_BANK, MACRO, etc.)")
+    sentiment: str = Field(..., description="Sentiment when event occurred")
+    sentiment_score: float = Field(..., description="Sentiment score (-1 to 1)")
+    affected_pairs: List[str] = Field(..., description="Currency pairs affected by this event")
+    reason: str = Field(..., description="Why correlations changed based on event type")
+    pair_changes: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of pair correlation changes"
+    )
+    multiplier_applied: float = Field(..., description="Correlation multiplier applied (e.g., 1.3)")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When change was recorded")
+
+
+class CorrelationChangeReport(BaseModel):
+    """
+    Report showing correlation changes caused by news events.
+    
+    Contains list of NewsCorrelationImpact entries showing the full
+    history of which news events caused correlation variations.
+    """
+    report_id: str = Field(..., description="Unique report identifier")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Report generation time")
+    portfolio_id: str = Field(..., description="Portfolio this report is for")
+    base_correlation_matrix_id: str = Field(..., description="Baseline matrix before changes")
+    current_correlation_matrix_id: str = Field(..., description="Current matrix after all changes")
+    news_correlation_impacts: List[NewsCorrelationImpact] = Field(
+        default_factory=list,
+        description="Individual news events that caused correlation changes"
+    )
+    total_changes: int = Field(..., description="Total number of correlation changes")
+    cumulative_impact: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Summary of cumulative impact on portfolio Greeks"
+    )
+
+
 # ==================== Risk Attribution Schemas ====================
 
 class RiskAttributionFactor(BaseModel):

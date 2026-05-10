@@ -26,6 +26,7 @@ let currentNewsFilter = 'portfolio';  // Default filter for news relevance
 let currentTimelineFilter = 'portfolio';  // Default filter for timeline
 let isLoading = false;  // Loading state for async operations
 let currentAttributionData = null;
+let currentCorrelationData = null;
 
 // Polling intervals (in milliseconds)
 const NEWS_POLL_INTERVAL = 60000; // 60 seconds
@@ -408,6 +409,13 @@ function switchTab(tab) {
     // If switching to timeline tab, ensure data is loaded
     if (tab === 'timeline') {
         loadTimeline(currentTimelineFilter);
+    }
+    
+    // If switching to correlation tab, ensure data is loaded
+    if (tab === 'correlation') {
+        if (!currentCorrelationData) {
+            loadCorrelationRisk();
+        }
     }
     
     console.log('Switched to tab:', tab);
@@ -2129,4 +2137,220 @@ function updateAttributionBar(containerId, attributionFactors) {
     
     html += '</div>';
     container.innerHTML = html;
+}
+
+// ==================== Correlation Risk Functions ====================
+
+async function loadCorrelationRisk() {
+    try {
+        showLoading();
+        
+        const response = await fetch('/api/correlation-risk-report?portfolio_id=FX-PORTFOLIO-01');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        currentCorrelationData = data;
+        
+        // Update summary metrics
+        document.getElementById('diversificationRatio').textContent = data.diversification_ratio ? data.diversification_ratio.toFixed(3) : '--';
+        document.getElementById('rawVega').textContent = data.raw_portfolio_vega ? formatNumber(data.raw_portfolio_vega, 2) : '--';
+        document.getElementById('adjustedVega').textContent = data.correlation_adjusted_vega ? formatNumber(data.correlation_adjusted_vega, 2) : '--';
+        
+        // Display highly correlated pairs
+        const pairsContainer = document.getElementById('correlationPairsList');
+        if (pairsContainer && data.highly_correlated_pairs && data.highly_correlated_pairs.length > 0) {
+            let pairsHtml = '';
+            data.highly_correlated_pairs.forEach(pair => {
+                const corrClass = pair.correlation > 0.7 ? 'high-positive' : (pair.correlation < -0.7 ? 'high-negative' : '');
+                pairsHtml += `<div class="correlation-pair-item ${corrClass}">
+                    <span class="pair-names">${pair.pair1} / ${pair.pair2}</span>
+                    <span class="pair-correlation">${pair.correlation.toFixed(3)}</span>
+                    <span class="pair-impact">Impact: ${formatNumber(pair.estimated_impact, 0)}</span>
+                </div>`;
+            });
+            pairsContainer.innerHTML = pairsHtml;
+        } else {
+            pairsContainer.innerHTML = '<div class="correlation-empty">No highly correlated pairs found</div>';
+        }
+        
+        // Display diversification opportunities
+        const divContainer = document.getElementById('diversificationList');
+        if (divContainer && data.diversification_opportunities && data.diversification_opportunities.length > 0) {
+            let divHtml = '';
+            data.diversification_opportunities.forEach(opp => {
+                divHtml += `<div class="diversification-item">
+                    <span class="opp-pair">${opp.pair1} + ${opp.pair2}</span>
+                    <span class="opp-correlation">Corr: ${opp.correlation.toFixed(3)}</span>
+                    <span class="opp-benefit">Potential Benefit: ${formatNumber(opp.diversification_benefit, 0)}</span>
+                </div>`;
+            });
+            divContainer.innerHTML = divHtml;
+        } else {
+            divContainer.innerHTML = '<div class="correlation-empty">No diversification opportunities identified</div>';
+        }
+        
+        // Display correlation matrix
+        const matrixContainer = document.getElementById('correlationMatrixDisplay');
+        if (matrixContainer && data.correlation_matrix) {
+            const matrix = data.correlation_matrix;
+            const pairs = matrix.pairs || [];
+            const correlations = matrix.correlations || {};
+            
+            // Build matrix table
+            let tableHtml = '<table class="correlation-matrix-table"><thead><tr><th></th>';
+            pairs.forEach(pair => {
+                tableHtml += `<th>${pair}</th>`;
+            });
+            tableHtml += '</tr></thead><tbody>';
+            
+            pairs.forEach(rowPair => {
+                tableHtml += `<tr><td class="matrix-row-label">${rowPair}</td>`;
+                pairs.forEach(colPair => {
+                    const key = rowPair < colPair ? `${rowPair},${colPair}` : `${colPair},${rowPair}`;
+                    const corr = correlations[key] || 0;
+                    const cellClass = corr > 0.5 ? 'high-positive' : (corr < -0.5 ? 'high-negative' : '');
+                    tableHtml += `<td class="matrix-cell ${cellClass}">${corr.toFixed(2)}</td>`;
+                });
+                tableHtml += '</tr>';
+            });
+            tableHtml += '</tbody></table>';
+            matrixContainer.innerHTML = tableHtml;
+        }
+        
+        // Load News Correlation Impacts
+        loadNewsCorrelationImpacts();
+        
+        hideLoading();
+    } catch (error) {
+        console.error('Failed to load correlation risk:', error);
+        hideLoading();
+        showAlert('error', 'Error', 'Failed to load correlation risk report');
+    }
+}
+
+async function loadNewsCorrelationImpacts() {
+    try {
+        const response = await fetch('/api/correlation-change-report?portfolio_id=FX-PORTFOLIO-01');
+        if (!response.ok) {
+            // API might not exist yet, hide the section gracefully
+            const section = document.getElementById('newsCorrelationList');
+            if (section) {
+                section.innerHTML = '<div class="correlation-empty">News correlation tracking not available</div>';
+            }
+            return;
+        }
+        
+        const data = await response.json();
+        const container = document.getElementById('newsCorrelationList');
+        if (!container) return;
+        
+        const impacts = data.news_correlation_impacts || [];
+        
+        if (impacts.length === 0) {
+            container.innerHTML = '<div class="correlation-empty">No news events have caused correlation changes yet</div>';
+            return;
+        }
+        
+        let html = '';
+        impacts.forEach(impact => {
+            const sentimentClass = impact.sentiment === 'positive' ? 'positive' : (impact.sentiment === 'negative' ? 'negative' : 'neutral');
+            const pairChanges = impact.pair_changes || [];
+            
+            html += `<div class="news-correlation-item">
+                <div class="news-corr-header">
+                    <span class="event-type-badge ${impact.event_type}">${impact.event_type}</span>
+                    <span class="sentiment-badge ${sentimentClass}">${impact.sentiment}</span>
+                    <span class="news-corr-time">${new Date(impact.timestamp).toLocaleString()}</span>
+                </div>
+                <div class="news-corr-headline">${impact.headline || 'N/A'}</div>
+                <div class="news-corr-reason">${impact.reason || ''}</div>
+                <div class="news-corr-pairs">
+                    <span class="pairs-label">Affected:</span>
+                    ${(impact.affected_pairs || []).map(p => `<span class="pair-badge">${p}</span>`).join('')}
+                </div>
+                <div class="news-corr-changes">
+                    <span class="changes-label">Correlation Changes:</span>
+                    ${pairChanges.length > 0 ? pairChanges.map(c => `
+                        <div class="pair-change-item">
+                            <span class="change-pair">${c.pair}</span>
+                            <span class="change-old">${c.old_corr?.toFixed(3) || '--'}</span>
+                            <span class="change-arrow">→</span>
+                            <span class="change-new">${c.new_corr?.toFixed(3) || '--'}</span>
+                            <span class="change-delta">(${c.change > 0 ? '+' : ''}${c.change?.toFixed(3) || '0'})</span>
+                        </div>
+                    `).join('') : '<span class="no-changes">No significant changes</span>'}
+                </div>
+                ${impact.url ? `<a href="${impact.url}" target="_blank" class="news-link">Source →</a>` : ''}
+            </div>`;
+        });
+        
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Failed to load news correlation impacts:', error);
+        const container = document.getElementById('newsCorrelationList');
+        if (container) {
+            container.innerHTML = '<div class="correlation-empty">Failed to load news correlation impacts</div>';
+        }
+    }
+}
+
+async function runCorrelationStressTest() {
+    const scenarioSelect = document.getElementById('stressScenarioSelect');
+    const scenarioId = scenarioSelect ? scenarioSelect.value : '2008_lehman';
+    
+    try {
+        showLoading();
+        
+        const response = await fetch('/api/correlation-stress-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                portfolio_id: 'FX-PORTFOLIO-01',
+                scenario_id: scenarioId
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        // Display stress test results
+        const resultsContainer = document.getElementById('stressTestResults');
+        if (resultsContainer) {
+            const scenario = data.scenario_name || scenarioId;
+            let html = `<div class="stress-result-header">
+                <span class="scenario-name">${scenario}</span>
+                <span class="scenario-impact">Total Impact: ${formatNumber(data.total_vega_impact, 0)}</span>
+            </div>`;
+            
+            if (data.highest_impact_pairs && data.highest_impact_pairs.length > 0) {
+                html += '<div class="stress-impact-pairs">';
+                html += '<h5>Highest Impact Pairs:</h5>';
+                data.highest_impact_pairs.forEach(pair => {
+                    html += `<div class="stress-pair-item">
+                        <span>${pair.pair1} / ${pair.pair2}</span>
+                        <span>Old Corr: ${(pair.old_correlation || 0).toFixed(2)}</span>
+                        <span>New Corr: ${(pair.new_correlation || 0).toFixed(2)}</span>
+                        <span>Impact: ${formatNumber(pair.vega_impact, 0)}</span>
+                    </div>`;
+                });
+                html += '</div>';
+            }
+            
+            resultsContainer.innerHTML = html;
+        }
+        
+        hideLoading();
+        showAlert('success', 'Stress Test Complete', `${scenarioId} scenario processed`);
+        
+    } catch (error) {
+        console.error('Failed to run correlation stress test:', error);
+        hideLoading();
+        showAlert('error', 'Error', 'Failed to run stress test');
+    }
 }

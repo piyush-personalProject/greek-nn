@@ -614,6 +614,65 @@ class NNRiskEngine:
         
         return result
     
+    def compute_correlation_adjusted_greeks(
+        self,
+        portfolio: Portfolio,
+        vol_surface: VolSurface,
+        spot_rates: Dict[str, float],
+        correlation_service=None,
+        risk_free_rate: float = 0.05
+    ) -> Tuple[PortfolioGreeks, Greeks]:
+        """
+        Compute Greeks with cross-asset correlation adjustment.
+        
+        This method computes:
+        1. Standard portfolio Greeks (without correlation adjustment)
+        2. Correlation-adjusted Greeks that account for cross-pair correlations
+        
+        The adjustment accounts for the fact that EURUSD and GBPUSD, for example,
+        tend to move together (~0.85 correlation), so having large positions in
+        both is riskier than the raw Greeks suggest.
+        
+        Args:
+            portfolio: Portfolio with positions
+            vol_surface: Current vol surface
+            spot_rates: Spot rates for instruments
+            correlation_service: CorrelationService instance (optional, creates default)
+            risk_free_rate: Risk-free rate for discounting
+            
+        Returns:
+            Tuple of (standard_greeks, correlation_adjustment_amount)
+        """
+        # Compute standard portfolio Greeks
+        standard_greeks = self.compute_portfolio_greeks(
+            portfolio=portfolio,
+            vol_surface=vol_surface,
+            spot_rates=spot_rates,
+            risk_free_rate=risk_free_rate
+        )
+        
+        # Import correlation service if available
+        if correlation_service is None:
+            try:
+                from services.correlation_service import get_correlation_service
+                correlation_service = get_correlation_service()
+            except ImportError:
+                # Correlation service not available - return standard Greeks
+                return standard_greeks, Greeks(delta=0, gamma=0, vega=0, theta=0, rho=0)
+        
+        # Get correlation-adjusted result
+        adjusted_result = correlation_service.compute_correlation_adjusted_greeks(
+            positions=portfolio.positions,
+            position_greeks=standard_greeks.position_greeks,
+            total_greeks=standard_greeks.total_greeks
+        )
+        
+        # Return standard Greeks but the correlation adjustment is in adjusted_result
+        # The adjustment can be used to understand diversification benefit
+        correlation_adjustment = adjusted_result.diversification_benefit
+        
+        return standard_greeks, correlation_adjustment
+    
     def compute_bucketed_vega(
         self,
         portfolio: Portfolio,

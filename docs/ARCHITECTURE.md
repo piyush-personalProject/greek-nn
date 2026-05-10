@@ -309,6 +309,25 @@ News Headline                    EventVector                    VolShock
 - **API Endpoints**:
   - `GET /api/risk-attribution-report` - Generate full attribution report
 
+### Correlation Service (`services/correlation_service.py`)
+- **Status**: ✅ Implemented (Module 10)
+- **Responsibility**: Cross-asset correlation risk management for FX portfolios
+- **Features**:
+  - FX correlation matrix management (EURUSD vs GBPUSD, etc.)
+  - Correlation-adjusted Greeks computation
+  - Diversification ratio calculation
+  - Correlation stress testing with crisis scenarios
+  - Diversification opportunity identification
+- **Correlation Model**:
+  - Default FX correlations (EURUSD-GBPUSD: 0.85, EURUSD-USDJPY: -0.65)
+  - Predefined crisis scenarios (2008 Lehman, COVID 2020, EM Stress, Risk-On/Risk-Off)
+  - Correlation multipliers for stress testing
+- **API Endpoints**:
+  - `GET /api/correlation-matrix` - View current FX correlation matrix
+  - `GET /api/correlation-risk-report` - Full correlation risk analysis
+  - `GET /api/correlation-stress-scenarios` - Available stress scenarios
+  - `POST /api/correlation-stress-test` - Run specific scenario
+
 ### API Server (`api.py`)
 - **File**: `api.py`
 - **Status**: ✅ Implemented
@@ -1159,3 +1178,4 @@ class VegaSpikeAttribution(BaseModel):
 | 2.4.0 | 2026-05 | Added Vega Impact Calculation section with detailed examples |
 | 2.5.0 | 2026-05 | Added Risk Attribution Report feature with explicit attribution percentages |
 | 2.6.0 | 2026-05 | Updated to reflect Risk Attribution Service (Module 9) |
+| 2.7.0 | 2026-05 | Added Module 10: Correlation Service for cross-asset correlation risk |

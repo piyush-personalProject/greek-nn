@@ -1323,6 +1323,33 @@ body {
         max-height: 400px;
         overflow-y: auto;
     }
+    
+    /* Center panel - ensure tabs are always accessible on mobile */
+    .panel-center {
+        position: relative;
+        z-index: 10;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+    
+    /* Tab selector - always visible and accessible on mobile */
+    .tab-selector {
+        position: relative;
+        z-index: 20;
+        display: flex !important;
+        visibility: visible;
+    }
+    
+    /* Tab content - ensure visible on mobile */
+    .panel-center .tab-content {
+        display: none;
+        flex-direction: column;
+        visibility: visible;
+    }
+    
+    .panel-center .tab-content.active {
+        display: flex;
+    }
 }
 
 /* Responsive */
@@ -1477,6 +1504,47 @@ body {
     .panel {
         border-radius: 6px;
         max-height: none;
+        overflow: visible;
+    }
+    
+    /* Center panel - explicitly visible on mobile */
+    .panel-center {
+        display: flex !important;
+        flex-direction: column;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+    
+    /* Tab selector - ensure always visible on mobile */
+    .tab-selector {
+        display: flex !important;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Tab content - ensure visibility on mobile */
+    .tab-content {
+        display: none;
+        visibility: visible;
+    }
+    
+    .tab-content.active {
+        display: flex !important;
+        flex-direction: column;
+    }
+    
+    /* Tab buttons - ensure they're always visible and clickable */
+    .panel-center .tab-btn {
+        display: inline-flex !important;
+        visibility: visible;
+        position: relative;
+        z-index: 25;
+    }
+    
+    /* Center panel header - ensure it stays above left panel when expanded */
+    .panel-center > .panel-header {
+        position: relative;
+        z-index: 15;
     }
     
     .panel-header {
@@ -3178,4 +3246,332 @@ body {
 
 .timeline-empty-text {
     font-size: 14px;
+}
+
+/* ==================== Correlation Risk Styles ==================== */
+
+.correlation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.correlation-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.correlation-summary {
+    display: flex;
+    gap: 16px;
+    padding: 16px;
+    background-color: var(--bg-card);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.correlation-metric {
+    flex: 1;
+    text-align: center;
+    padding: 12px;
+    background-color: var(--bg-secondary);
+    border-radius: 6px;
+}
+
+.correlation-metric .metric-label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.correlation-metric .metric-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.correlation-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.correlation-section h4 {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.correlation-pairs-list,
+.diversification-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.correlation-pair-item,
+.diversification-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background-color: var(--bg-card);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.correlation-pair-item.high-positive {
+    border-left: 3px solid var(--accent-green);
+}
+
+.correlation-pair-item.high-negative {
+    border-left: 3px solid var(--accent-red);
+}
+
+.pair-names,
+.opp-pair {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.pair-correlation,
+.opp-correlation {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.pair-impact,
+.opp-benefit {
+    font-size: 12px;
+    color: var(--accent-yellow);
+}
+
+.correlation-matrix-display {
+    overflow-x: auto;
+}
+
+.correlation-matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.correlation-matrix-table th,
+.correlation-matrix-table td {
+    padding: 8px;
+    text-align: center;
+    border: 1px solid var(--border-color);
+}
+
+.correlation-matrix-table th {
+    background-color: var(--bg-secondary);
+    font-weight: 600;
+}
+
+.matrix-row-label {
+    font-weight: 600;
+    background-color: var(--bg-secondary);
+}
+
+.matrix-cell {
+    font-family: monospace;
+}
+
+.matrix-cell.high-positive {
+    background-color: rgba(34, 197, 94, 0.2);
+    color: var(--accent-green);
+}
+
+.matrix-cell.high-negative {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: var(--accent-red);
+}
+
+.stress-test-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.stress-test-controls select {
+    flex: 1;
+    padding: 8px 12px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+}
+
+.stress-test-results {
+    background-color: var(--bg-card);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.stress-result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 12px;
+}
+
+.scenario-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.scenario-impact {
+    color: var(--accent-yellow);
+    font-weight: 600;
+}
+
+.stress-impact-pairs h5 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.stress-pair-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px;
+    background-color: var(--bg-secondary);
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+.stress-pair-item span:first-child {
+    font-weight: 600;
+}
+
+.correlation-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 20px;
+    text-align: center;
+}
+
+/* News Correlation Impacts */
+.news-correlation-info {
+    margin-bottom: 12px;
+}
+
+.news-correlation-info .info-text {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.news-correlation-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.news-correlation-item {
+    background-color: var(--bg-card);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    padding: 12px;
+}
+
+.news-corr-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.news-corr-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.news-corr-headline {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    line-height: 1.4;
+}
+
+.news-corr-reason {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-style: italic;
+}
+
+.news-corr-pairs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.news-corr-pairs .pairs-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.news-corr-changes {
+    background-color: var(--bg-secondary);
+    border-radius: 4px;
+    padding: 8px;
+}
+
+.news-corr-changes .changes-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 6px;
+}
+
+.news-corr-changes .no-changes {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.pair-change-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    padding: 4px 0;
+}
+
+.pair-change-item .change-pair {
+    font-weight: 600;
+    min-width: 100px;
+}
+
+.pair-change-item .change-old {
+    color: var(--text-muted);
+}
+
+.pair-change-item .change-arrow {
+    color: var(--text-muted);
+}
+
+.pair-change-item .change-new {
+    font-weight: 600;
+}
+
+.pair-change-item .change-delta {
+    color: var(--accent-yellow);
+}
+
+.news-corr-item .news-link {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 11px;
 }

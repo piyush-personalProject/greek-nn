@@ -24,7 +24,7 @@ from schemas import (
     SpotRateResponse, SpotRateChange, SpotRateHistoryItem,
     SpotRateAlertData, RiskAlertData, AlertsResponse,
     CombinedImpactRequest, CombinedImpactResponse, SpotImpactData,
-    RiskAttributionReport
+    RiskAttributionReport, CorrelationStressTest
 )
 from services.risk_attribution_service import get_attribution_service
 from nn_risk_engine import NNRiskEngine, BlackScholesGreeksCPU
@@ -2191,6 +2191,420 @@ async def get_risk_attribution_report(
         except Exception as e:
             span.log(f"Failed to generate risk attribution report: {e}", level=40)
             logger.error(f"Failed to generate risk attribution report: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Correlation Risk Endpoints ====================
+
+@app.get("/api/correlation-matrix")
+async def get_correlation_matrix():
+    """
+    Get the current FX correlation matrix.
+    
+    Shows correlations between currency pairs in the portfolio.
+    Example: EURUSD vs GBPUSD = 0.85 (highly correlated)
+             EURUSD vs USDJPY = -0.65 (negatively correlated)
+    """
+    from services.correlation_service import get_correlation_service
+    
+    try:
+        corr_service = get_correlation_service()
+        matrix = corr_service.get_correlation_matrix()
+        
+        # Build correlation pairs list
+        pairs_list = []
+        for i, pair1 in enumerate(matrix.pairs):
+            for j, pair2 in enumerate(matrix.pairs):
+                if i < j:
+                    corr = matrix.get_correlation(pair1, pair2)
+                    pairs_list.append({
+                        "pair1": pair1,
+                        "pair2": pair2,
+                        "correlation": round(corr, 2)
+                    })
+        
+        return {
+            "matrix_id": matrix.matrix_id,
+            "base_date": matrix.base_date.isoformat(),
+            "pairs": matrix.pairs,
+            "correlations": pairs_list,
+            "source": matrix.source
+        }
+    except Exception as e:
+        logger.error(f"Failed to get correlation matrix: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/correlation-risk-report")
+async def get_correlation_risk_report(
+    portfolio_id: str = Query("FX-PORTFOLIO-01", description="Portfolio to analyze")
+):
+    """
+    Generate comprehensive correlation risk report.
+    
+    Shows:
+    - Current portfolio correlation exposure
+    - Correlation-adjusted Greeks with diversification metrics
+    - Stress test results for crisis scenarios (2008 Lehman, COVID 2020, etc.)
+    - Diversification opportunities
+    
+    Diversification Ratio:
+    - Ratio < 1.0: Correlations provide diversification benefit (risk reduced)
+    - Ratio = 1.0: No diversification benefit (uncorrelated or concentrated)
+    - Ratio > 1.0: Concentration risk (correlations increase effective risk)
+    """
+    from services.correlation_service import get_correlation_service
+    
+    with get_tracer().start_span("correlation_risk_report", portfolio_id=portfolio_id) as span:
+        global risk_engine
+        
+        if risk_engine is None:
+            raise HTTPException(status_code=503, detail="Risk engine not available")
+        
+        if portfolio_id not in _portfolios:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        
+        portfolio = _portfolios[portfolio_id]
+        vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        try:
+            # 1. Compute baseline Greeks
+            baseline_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=vol_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            # 2. Get correlation service
+            corr_service = get_correlation_service()
+            
+            # 3. Generate correlation risk report
+            report = corr_service.generate_correlation_risk_report(
+                portfolio_id=portfolio_id,
+                positions=portfolio.positions,
+                position_greeks=baseline_greeks.position_greeks,
+                total_greeks=baseline_greeks.total_greeks
+            )
+            
+            # 4. Build response
+            return {
+                "report_id": report.report_id,
+                "timestamp": report.timestamp.isoformat(),
+                "portfolio_id": report.portfolio_id,
+                "correlation_matrix_id": report.correlation_matrix_id,
+                "raw_total_greeks": report.raw_total_greeks.to_dict(),
+                "adjusted_total_greeks": report.adjusted_total_greeks.to_dict(),
+                "diversification_ratio": report.diversification_ratio,
+                "highly_correlated_pairs": report.highly_correlated_pairs,
+                "diversification_opportunities": report.diversification_opportunities,
+                "stress_tests": [
+                    {
+                        "scenario_id": st.scenario.scenario_id,
+                        "scenario_name": st.scenario.name,
+                        "scenario_description": st.scenario.description,
+                        "baseline_greeks": st.baseline_greeks.to_dict(),
+                        "stressed_greeks": st.stressed_greeks.to_dict(),
+                        "greeks_change": st.greeks_change.to_dict(),
+                        "change_percentages": st.change_percentages.to_dict(),
+                        "highest_impact_pairs": st.highest_impact_pairs
+                    }
+                    for st in report.stress_tests
+                ],
+                "correlation_attribution": [
+                    {
+                        "factor_type": f.factor_type,
+                        "source": f.source,
+                        "percentage": f.percentage,
+                        "description": f.description
+                    }
+                    for f in report.correlation_attribution
+                ]
+            }
+        except Exception as e:
+            span.log(f"Failed to generate correlation risk report: {e}", level=40)
+            logger.error(f"Failed to generate correlation risk report: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/correlation-adjusted")
+async def get_news_adjusted_correlation_matrix(
+    event_type: str = Query(..., description="News event type (CENTRAL_BANK, MACRO, etc.)"),
+    affected_pairs: str = Query(..., description="Comma-separated list of affected FX pairs"),
+    sentiment: str = Query("neutral", description="Sentiment (positive/negative/neutral)"),
+    sentiment_score: float = Query(0.0, description="Sentiment score (-1 to 1)")
+):
+    """
+    Get correlation matrix adjusted for a specific news event.
+    
+    When news events occur, correlations between affected pairs shift.
+    This endpoint returns the adjusted correlation matrix showing how
+    correlations would change based on the event.
+    
+    Event types:
+    - CENTRAL_BANK: Central bank decisions (Fed, ECB, etc.)
+    - INTEREST_RATE: Interest rate announcements
+    - INFLATION: CPI, PPI data releases
+    - EMPLOYMENT: NFP, unemployment data
+    - MACRO: GDP, manufacturing data
+    - GEOPOLITICAL: Political events, wars, conflicts
+    - EM_STRESS: Emerging market stress events
+    - NATURAL_DISASTER: Disasters affecting currencies
+    
+    Example:
+    /api/correlation-adjusted?event_type=CENTRAL_BANK&affected_pairs=EURUSD,GBPUSD&sentiment=negative&sentiment_score=-0.5
+    """
+    from services.correlation_service import get_correlation_service
+    
+    with get_tracer().start_span("news_adjusted_correlation", event_type=event_type) as span:
+        corr_service = get_correlation_service()
+        
+        # Parse affected pairs
+        pairs_list = [p.strip() for p in affected_pairs.split(",")]
+        
+        # Get adjusted matrix
+        adjusted_matrix = corr_service.apply_news_event_correlation_adjustment(
+            event_type=event_type,
+            affected_pairs=pairs_list,
+            sentiment=sentiment,
+            sentiment_score=sentiment_score
+        )
+        
+        # Get change summary
+        original_matrix = corr_service.get_correlation_matrix()
+        change_summary = corr_service.get_correlation_change_summary(original_matrix, adjusted_matrix)
+        
+        # Build response
+        return {
+            "event_type": event_type,
+            "affected_pairs": pairs_list,
+            "sentiment": sentiment,
+            "sentiment_score": sentiment_score,
+            "adjusted_matrix_id": adjusted_matrix.matrix_id,
+            "correlations": {
+                f"{k[0]}_{k[1]}": round(v, 3) 
+                for k, v in adjusted_matrix.correlations.items()
+            },
+            "change_summary": change_summary,
+            "base_matrix_id": original_matrix.matrix_id
+        }
+
+
+@app.post("/api/correlation-adjusted-with-event")
+async def get_correlation_adjusted_with_event(
+    event_data: dict
+):
+    """
+    Get correlation matrix adjusted using a news event object.
+    
+    Accepts a news event dict with:
+    - event_type: Event type string
+    - affected_pairs: List of affected pairs
+    - sentiment: Sentiment string
+    - sentiment_score: Numerical score
+    - headline: News headline (optional, for tracking)
+    - url: URL to original article (optional, for tracing)
+    
+    Returns the adjusted correlation matrix with change summary.
+    """
+    from services.correlation_service import get_correlation_service
+    
+    with get_tracer().start_span("event_adjusted_correlation") as span:
+        corr_service = get_correlation_service()
+        
+        event_type = event_data.get("event_type", "UNKNOWN")
+        affected_pairs = event_data.get("affected_pairs", [])
+        sentiment = event_data.get("sentiment", "neutral")
+        sentiment_score = event_data.get("sentiment_score", 0.0)
+        headline = event_data.get("headline")
+        url = event_data.get("url")
+        
+        if not affected_pairs:
+            return {
+                "error": "No affected pairs provided",
+                "message": "Provide affected_pairs list in request body"
+            }
+        
+        # Get adjusted matrix
+        adjusted_matrix = corr_service.apply_news_event_correlation_adjustment(
+            event_type=event_type,
+            affected_pairs=affected_pairs,
+            sentiment=sentiment,
+            sentiment_score=sentiment_score,
+            headline=headline,
+            url=url
+        )
+        
+        # Get change summary
+        original_matrix = corr_service.get_correlation_matrix()
+        change_summary = corr_service.get_correlation_change_summary(original_matrix, adjusted_matrix)
+        
+        return {
+            "event_type": event_type,
+            "affected_pairs": affected_pairs,
+            "sentiment": sentiment,
+            "sentiment_score": sentiment_score,
+            "headline": headline,
+            "url": url,
+            "adjusted_matrix_id": adjusted_matrix.matrix_id,
+            "correlations": {
+                f"{k[0]}_{k[1]}": round(v, 3) 
+                for k, v in adjusted_matrix.correlations.items()
+            },
+            "change_summary": change_summary,
+            "base_matrix_id": original_matrix.matrix_id
+        }
+
+
+@app.get("/api/correlation-change-report")
+async def get_correlation_change_report(
+    portfolio_id: str = Query("FX-PORTFOLIO-01", description="Portfolio to analyze")
+):
+    """
+    Get report showing all news events that caused correlation changes.
+    
+    This provides full traceability:
+    - Which news headlines caused correlation variations
+    - Why (based on event type rules)
+    - Links to original articles (URLs)
+    - Factor percentages for each change
+    
+    Returns CorrelationChangeReport with news_correlation_impacts list.
+    """
+    from services.correlation_service import get_correlation_service
+    
+    with get_tracer().start_span("correlation_change_report", portfolio_id=portfolio_id) as span:
+        corr_service = get_correlation_service()
+        
+        report = corr_service.get_correlation_change_report(portfolio_id=portfolio_id)
+        
+        return {
+            "report_id": report.report_id,
+            "timestamp": report.timestamp.isoformat(),
+            "portfolio_id": report.portfolio_id,
+            "base_correlation_matrix_id": report.base_correlation_matrix_id,
+            "current_correlation_matrix_id": report.current_correlation_matrix_id,
+            "total_changes": report.total_changes,
+            "cumulative_impact": report.cumulative_impact,
+            "news_correlation_impacts": [
+                {
+                    "headline": impact.headline,
+                    "url": impact.url,
+                    "event_type": impact.event_type,
+                    "sentiment": impact.sentiment,
+                    "sentiment_score": impact.sentiment_score,
+                    "affected_pairs": impact.affected_pairs,
+                    "reason": impact.reason,
+                    "pair_changes": impact.pair_changes,
+                    "multiplier_applied": impact.multiplier_applied,
+                    "timestamp": impact.timestamp.isoformat()
+                }
+                for impact in report.news_correlation_impacts
+            ]
+        }
+
+
+@app.get("/api/correlation-stress-scenarios")
+async def get_correlation_stress_scenarios():
+    """
+    Get available correlation stress test scenarios.
+    
+    Predefined scenarios model how correlations change during crises:
+    - 2008_lehman: Global financial crisis - all correlations tend to 1.0
+    - covid_march_2020: Pandemic crisis - USD strengthens vs all
+    - em_stress: Emerging market currency stress
+    - risk_on_risk_off: Risk sentiment drives all correlations toward 1.0
+    """
+    from services.correlation_service import get_correlation_service
+    
+    try:
+        corr_service = get_correlation_service()
+        scenarios = corr_service.get_available_scenarios()
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "scenarios": scenarios
+        }
+    except Exception as e:
+        logger.error(f"Failed to get stress scenarios: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/correlation-stress-test")
+async def run_correlation_stress_test(
+    scenario_id: str = Query(..., description="Scenario ID to test"),
+    portfolio_id: str = Query("FX-PORTFOLIO-01", description="Portfolio to test")
+):
+    """
+    Run a specific correlation stress test scenario.
+    
+    Tests how portfolio Greeks would change if correlations moved to crisis levels.
+    
+    Args:
+        scenario_id: ID of the scenario (from /api/correlation-stress-scenarios)
+        portfolio_id: Portfolio to test
+    
+    Returns:
+        CorrelationStressResult with baseline vs stressed Greeks comparison
+    """
+    from services.correlation_service import get_correlation_service, CRISIS_CORRELATION_SCENARIOS
+    
+    with get_tracer().start_span("correlation_stress_test", scenario_id=scenario_id) as span:
+        global risk_engine
+        
+        if risk_engine is None:
+            raise HTTPException(status_code=503, detail="Risk engine not available")
+        
+        if portfolio_id not in _portfolios:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        
+        if scenario_id not in CRISIS_CORRELATION_SCENARIOS:
+            raise HTTPException(status_code=404, detail=f"Unknown scenario: {scenario_id}")
+        
+        portfolio = _portfolios[portfolio_id]
+        vol_surface = _current_vol_surface or create_mock_surface(datetime.now())
+        
+        try:
+            # 1. Compute baseline Greeks
+            baseline_greeks = risk_engine.compute_portfolio_greeks(
+                portfolio=portfolio,
+                vol_surface=vol_surface,
+                spot_rates=_current_spot_rates,
+                risk_free_rate=0.05
+            )
+            
+            # 2. Get scenario data
+            scenario_data = CRISIS_CORRELATION_SCENARIOS[scenario_id]
+            scenario = CorrelationStressTest(
+                scenario_id=scenario_id,
+                name=scenario_data["name"],
+                description=scenario_data["description"],
+                correlation_multipliers=scenario_data["multipliers"]
+            )
+            
+            # 3. Get correlation service and run stress test
+            corr_service = get_correlation_service()
+            result = corr_service.run_stress_test(
+                raw_greeks=baseline_greeks.total_greeks,
+                positions=portfolio.positions,
+                position_greeks=baseline_greeks.position_greeks,
+                scenario=scenario
+            )
+            
+            # 4. Build response
+            return {
+                "scenario_id": result.scenario.scenario_id,
+                "scenario_name": result.scenario.name,
+                "scenario_description": result.scenario.description,
+                "baseline_greeks": result.baseline_greeks.to_dict(),
+                "stressed_greeks": result.stressed_greeks.to_dict(),
+                "greeks_change": result.greeks_change.to_dict(),
+                "change_percentages": result.change_percentages.to_dict(),
+                "highest_impact_pairs": result.highest_impact_pairs
+            }
+        except Exception as e:
+            span.log(f"Failed to run correlation stress test: {e}", level=40)
+            logger.error(f"Failed to run correlation stress test: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -121,6 +121,7 @@
                         <button class="tab-btn" data-tab="timeline">Timeline</button>
                         <button class="tab-btn" data-tab="alerts">Alerts <span id="spotAlertBadge" class="alert-badge" style="display:none">0</span></button>
                         <button class="tab-btn" data-tab="attribution">Risk Attribution</button>
+                        <button class="tab-btn" data-tab="correlation">Correlation Risk</button>
                     </div>
                     <div class="greek-selector" id="ladderGreekSelector">
                         <label>Greek:</label>
@@ -361,6 +362,80 @@
                                 <!-- Populated by JS -->
                             </tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- Correlation Risk View -->
+                <div class="tab-content" id="tab-correlation">
+                    <div class="correlation-header">
+                        <h3>Cross-Asset Correlation Risk</h3>
+                        <button class="btn btn-small" id="refreshCorrelationBtn" onclick="loadCorrelationRisk()">Refresh</button>
+                    </div>
+                    <div class="correlation-summary">
+                        <div class="correlation-metric">
+                            <span class="metric-label">Diversification Ratio</span>
+                            <span class="metric-value" id="diversificationRatio">--</span>
+                        </div>
+                        <div class="correlation-metric">
+                            <span class="metric-label">Raw Portfolio Vega</span>
+                            <span class="metric-value" id="rawVega">--</span>
+                        </div>
+                        <div class="correlation-metric">
+                            <span class="metric-label">Correlation-Adjusted Vega</span>
+                            <span class="metric-value" id="adjustedVega">--</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Highly Correlated Pairs -->
+                    <div class="correlation-section">
+                        <h4>Highly Correlated Pairs</h4>
+                        <div class="correlation-pairs-list" id="correlationPairsList">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- Diversification Opportunities -->
+                    <div class="correlation-section">
+                        <h4>Diversification Opportunities</h4>
+                        <div class="diversification-list" id="diversificationList">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- Correlation Matrix Display -->
+                    <div class="correlation-section">
+                        <h4>FX Pair Correlations</h4>
+                        <div class="correlation-matrix-display" id="correlationMatrixDisplay">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- Stress Test Results -->
+                    <div class="correlation-section">
+                        <h4>Stress Test Results</h4>
+                        <div class="stress-test-controls">
+                            <select id="stressScenarioSelect">
+                                <option value="2008_lehman">2008 Lehman Crisis (2x correlations)</option>
+                                <option value="covid_march_2020">COVID March 2020 (2.5x correlations)</option>
+                                <option value="em_stress">EM Stress (3x correlations)</option>
+                                <option value="risk_on_risk_off">Risk-On/Risk-Off (Mixed)</option>
+                            </select>
+                            <button class="btn btn-small" onclick="runCorrelationStressTest()">Run Stress Test</button>
+                        </div>
+                        <div class="stress-test-results" id="stressTestResults">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- News Correlation Impacts -->
+                    <div class="correlation-section">
+                        <h4>News Correlation Impacts</h4>
+                        <div class="news-correlation-info">
+                            <span class="info-text">News events that have caused correlation shifts</span>
+                        </div>
+                        <div class="news-correlation-list" id="newsCorrelationList">
+                            <!-- Populated by JS -->
+                        </div>
                     </div>
                 </div>
             </main>

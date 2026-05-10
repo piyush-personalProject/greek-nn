@@ -233,12 +233,16 @@ class RiskAttributionService:
         vol_shock: Optional[VolShock],
         news_event: Optional[EventVector],
         nn_model_mode: str,
-        greek_name: str
+        greek_name: str,
+        correlation_adjustment: Optional[Greeks] = None
     ) -> List[RiskAttributionFactor]:
         """
         Compute attribution factors for a single Greek.
         
         Returns list of RiskAttributionFactor with percentages that sum to ~100%.
+        
+        Args:
+            correlation_adjustment: Optional Greeks adjustment from cross-asset correlations
         """
         factors = []
         
@@ -300,6 +304,24 @@ class RiskAttributionService:
                     "nn_adjustment_estimate": delta_value * weights["nn_adjustment_weight"]
                 }
             ))
+            
+            # 4. Correlation effect attribution (if provided)
+            if correlation_adjustment is not None:
+                corr_value = getattr(correlation_adjustment, greek_name, 0) or 0
+                if abs(corr_value) > 0.01:
+                    # Correlation effect percentage based on relative magnitude
+                    corr_pct = min(abs(corr_value / delta_value) * 100, 15.0) if delta_value != 0 else 0
+                    if corr_pct > 0.5:  # Only show if meaningful
+                        factors.append(RiskAttributionFactor(
+                            factor_type="correlation_effect",
+                            source="cross_asset_correlation",
+                            percentage=round(corr_pct, 1),
+                            description=f"Cross-asset correlation effect from correlated FX pairs (EURUSD-GBPUSD etc.)",
+                            evidence={
+                                "correlation_adjustment_value": corr_value,
+                                "greek_change": delta_value
+                            }
+                        ))
         else:
             # No news event - attribute entirely to vol drift
             factors.append(RiskAttributionFactor(

@@ -254,7 +254,7 @@ class RSSFeedSource(NewsSourceBase):
             from email.utils import parsedate_to_datetime
             published_at = parsedate_to_datetime(pub_date)
         except:
-            published_at = datetime.now()
+            published_at = datetime.now().astimezone()
         
         return NewsEvent(
             headline=entry.get("title", ""),
@@ -414,70 +414,7 @@ class NewsIngestionService:
                 h.headline.lower(): h for h in sorted_headlines[:self.max_recent]
             }
         
-        # If no headlines after all attempts, use mock data for demo
-        if not all_headlines:
-            self.logger.warning(
-                "No headlines received from any source - falling back to mock data for demo",
-                extra_fields={"action": "using_mock_data", "reason": "no_headlines_received"}
-            )
-            all_headlines = self._get_mock_headlines()
-        
-        self.logger.info(
-            "Returning headlines to caller",
-            extra_fields={
-                "action": "news_return",
-                "headlines_count": len(all_headlines),
-                "unique_count": len(self.recent_headlines)
-            }
-        )
-        
         return list(self.recent_headlines.values())
-    
-    def _get_mock_headlines(self) -> List[NewsEvent]:
-        """Get mock headlines when real news is unavailable."""
-        mock_headlines = [
-            NewsEvent(
-                headline="Fed signals potential rate cuts amid cooling inflation data",
-                source="Reuters",
-                url="https://reuters.com",
-                published_at=datetime.now(),
-                content="Federal Reserve officials indicate openness to rate reductions as inflation shows signs of moderating."
-            ),
-            NewsEvent(
-                headline="ECB maintains cautious stance on monetary policy normalization",
-                source="Bloomberg",
-                url="https://bloomberg.com",
-                published_at=datetime.now(),
-                content="European Central Bank keeps options open for future adjustments."
-            ),
-            NewsEvent(
-                headline="MAS surveillances indicate stable growth outlook for Singapore",
-                source="MAS",
-                url="https://mas.gov.sg",
-                published_at=datetime.now(),
-                content="Monetary Authority of Singapore maintains modest growth expectations."
-            ),
-            NewsEvent(
-                headline="NFP report shows stronger than expected employment growth",
-                source="CNBC",
-                url="https://cnbc.com",
-                published_at=datetime.now(),
-                content="Non-farm payrolls exceed analyst expectations, signaling labor market resilience."
-            ),
-            NewsEvent(
-                headline="USD weakens as risk sentiment improves across markets",
-                source="Financial Times",
-                url="https://ft.com",
-                published_at=datetime.now(),
-                content="US dollar index declines amid optimism following trade developments."
-            ),
-        ]
-        
-        for h in mock_headlines:
-            self.recent_headlines[h.headline.lower()] = h
-        
-        self.logger.info(f"Added {len(mock_headlines)} mock headlines for demo")
-        return mock_headlines
     
     async def stream_all_headlines(self) -> AsyncIterator[NewsEvent]:
         """Stream headlines from all sources."""
