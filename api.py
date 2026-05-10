@@ -2100,6 +2100,7 @@ async def get_risk_attribution_report(
                 "baseline_greeks": report.baseline_greeks.to_dict(),
                 "current_greeks": report.current_greeks.to_dict(),
                 "greeks_delta": report.greeks_delta.to_dict(),
+                "affected_pairs": vol_shock.affected_pairs if vol_shock else [],
                 "delta_attribution": [
                     {
                         "factor_type": f.factor_type,

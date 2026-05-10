@@ -2274,22 +2274,34 @@ body {
 .impact-comparison {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 10px;
     padding: 8px;
     background-color: var(--bg-card);
     border-radius: 4px;
+    gap: 12px;
 }
 
 .impact-column {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    align-items: flex-start;
+    min-width: 120px;
+}
+
+.impact-column .greek-compare-item {
+    display: flex;
+    gap: 6px;
+    font-size: 11px;
+    white-space: nowrap;
 }
 
 .impact-arrow {
     color: var(--text-muted);
     font-size: 14px;
+    padding-top: 12px;
+    flex-shrink: 0;
 }
 
 .impact-label {
@@ -2306,11 +2318,13 @@ body {
 
 .greek-compare-item .label {
     color: var(--text-muted);
+    min-width: 45px;
 }
 
 .greek-compare-item .value {
     font-family: 'Monaco', 'Menlo', monospace;
     color: var(--text-primary);
+    text-align: right;
 }
 
 .greek-compare-item .value.positive {
@@ -2319,6 +2333,11 @@ body {
 
 .greek-compare-item .value.negative {
     color: var(--accent-red);
+}
+
+.baseline-greeks,
+.current-greeks {
+    min-width: 100px;
 }
 
 .spot-impacts-list {
@@ -2368,14 +2387,32 @@ body {
     }
     
     .impact-comparison {
-        flex-direction: column;
+        flex-direction: row;
         gap: 6px;
         padding: 10px;
     }
     
     .impact-arrow {
-        transform: rotate(90deg);
+        transform: none;
         font-size: 12px;
+        padding-top: 12px;
+    }
+    
+    .impact-column {
+        min-width: 100px;
+    }
+    
+    .impact-column .greek-compare-item {
+        flex-direction: column;
+        gap: 2px;
+    }
+    
+    .greek-compare-item .label {
+        min-width: auto;
+    }
+    
+    .greek-compare-item .value {
+        text-align: left;
     }
     
     .spot-impacts-list {
@@ -2696,6 +2733,59 @@ body {
     font-size: 12px;
     padding: 16px;
     text-align: center;
+}
+
+/* Attribution Pairs - Currency pair badges */
+.attribution-pairs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 0;
+}
+
+.attribution-pairs .pair-badge {
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: var(--accent-cyan);
+    background-color: rgba(6, 182, 212, 0.1);
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--accent-cyan);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Attribution Greeks Impact Summary */
+.attribution-greeks-impact {
+    display: flex;
+    gap: 24px;
+    padding: 8px 0;
+}
+
+.impact-summary-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.impact-summary-item .label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.impact-summary-item .value {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.impact-summary-item .value.positive {
+    color: var(--accent-green);
+}
+
+.impact-summary-item .value.negative {
+    color: var(--accent-red);
 }
 
 /* Attribution Greeks Comparison Table */

@@ -6,7 +6,7 @@ A real-time neural network-based portfolio risk management system with a FastAPI
 
 The GreekNN Risk System is a modular Python library designed for financial institutions to perform portfolio risk analysis. It integrates news ingestion, NLP-based event processing, volatility shock modeling, and neural network-based Greeks computation with a web-based UI.
 
-**Status:** All core Python modules implemented (1-8). FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization and news impact analysis.
+**Status:** All core Python modules implemented (1-9). FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization and news impact analysis.
 
 ## Key Features
 
@@ -162,6 +162,7 @@ The API will be available at `http://localhost:8000`. The web UI dashboard will 
 | GET | `/api/news-impact` | **Get news with calculated impact on Greeks** |
 | GET | `/api/audit/trace/{trace_id}` | Get full audit trace for pipeline execution |
 | GET | `/api/audit/traces` | List recent audit traces |
+| GET | `/api/risk-attribution-report` | Generate risk attribution report with explicit percentages |
 | POST | `/api/trades` | Create new trade |
 | DELETE | `/api/trades/{id}` | Delete trade |
 | WS | `/ws/greeks` | Real-time Greeks WebSocket |
@@ -414,6 +415,7 @@ The system consists of 8 main modules:
 6. **Alert System** (`services/alert_service.py`) - Risk limit monitoring and spot rate alerts
 7. **Forex Service** (`services/forex_service.py`) - Live forex spot rate integration with Alpha Vantage/Frankfurter APIs
 8. **Audit Service** (`services/audit_service.py`) - Full pipeline traceability via SQLite in-memory database
+9. **Risk Attribution Service** (`services/risk_attribution_service.py`) - Break down Greek changes into explicit attribution percentages
 
 ### Logging System
 

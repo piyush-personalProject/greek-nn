@@ -1768,6 +1768,30 @@ async function loadRiskAttribution() {
         document.getElementById('confidenceScore').textContent = data.confidence_score ? `${(data.confidence_score * 100).toFixed(0)}%` : '--';
         document.getElementById('attributionReportId').textContent = data.report_id || '--';
         
+        // Display affected currency pairs
+        const pairsContainer = document.getElementById('attributionPairs');
+        if (pairsContainer && data.affected_pairs && data.affected_pairs.length > 0) {
+            pairsContainer.innerHTML = data.affected_pairs.map(pair => 
+                `<span class="pair-badge">${pair}</span>`
+            ).join('');
+        }
+        
+        // Display Greeks impact summary
+        const impactContainer = document.getElementById('attributionGreeksImpact');
+        if (impactContainer && data.greeks_delta) {
+            const delta = data.greeks_delta;
+            impactContainer.innerHTML = `
+                <div class="impact-summary-item">
+                    <span class="label">Delta:</span>
+                    <span class="value ${delta.delta > 0 ? 'positive' : delta.delta < 0 ? 'negative' : ''}">${delta.delta > 0 ? '+' : ''}${formatNumber(delta.delta, 2)}</span>
+                </div>
+                <div class="impact-summary-item">
+                    <span class="label">Vega:</span>
+                    <span class="value ${delta.vega > 0 ? 'positive' : delta.vega < 0 ? 'negative' : ''}">${delta.vega > 0 ? '+' : ''}${formatNumber(delta.vega, 2)}</span>
+                </div>
+            `;
+        }
+        
         // Update Greeks comparison table
         updateAttributionGreeksTable(data.baseline_greeks, data.current_greeks, data.greeks_delta);
         
@@ -1899,7 +1923,10 @@ function updateAttributionBar(containerId, attributionFactors) {
         return;
     }
     
-    console.log('Building attribution HTML for:', containerId, 'factors:', attributionFactors.length);
+    // Filter to show only positive and negative attributions (exclude zero/empty)
+    const filteredFactors = attributionFactors.filter(f => f.percentage > 0);
+    
+    console.log('Building attribution HTML for:', containerId, 'factors:', filteredFactors.length);
     let html = '<div class="attribution-factors">';
     // Color map based on factor_type (not source) for consistent coloring
     const colors = {
@@ -1909,7 +1936,7 @@ function updateAttributionBar(containerId, attributionFactors) {
         'spot_rate_movement': '#06b6d4'
     };
     
-    attributionFactors.forEach(factor => {
+    filteredFactors.forEach(factor => {
         const color = colors[factor.factor_type] || '#6b7280';
         const width = factor.percentage;
         const sourceLabel = factor.source || factor.factor_type;

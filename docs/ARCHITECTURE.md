@@ -5,7 +5,7 @@
 
 The GreekNN Risk System is a portfolio risk management library that processes news events through NLP to generate volatility shocks, applies them to a vol surface, and computes neural network-based Greeks for risk assessment.
 
-**Current Status:** All core Python modules implemented (1-8). REST API server (FastAPI) fully operational with WebSocket support for real-time Greeks visualization.
+**Current Status:** All core Python modules implemented (1-9). REST API server (FastAPI) fully operational with WebSocket support for real-time Greeks visualization.
 
 ## Project Components
 
@@ -836,6 +836,7 @@ The system provides full audit trail for the news-to-Greeks pipeline through the
 | GET | `/api/audit/trace/{trace_id}` | Get full pipeline trace with all stages |
 | GET | `/api/audit/traces` | List recent traces (supports `?status=active`) |
 | POST | `/api/audit/trace/{trace_id}/end` | Mark trace as completed |
+| GET | `/api/risk-attribution-report` | Generate risk attribution report with explicit percentages |
 
 **Example Trace Retrieval:**
 
@@ -1141,3 +1142,4 @@ class VegaSpikeAttribution(BaseModel):
 | 2.3.0 | 2026-05 | Added mobile-friendly UI, sort by category/sentiment, Greeks display at booking, spot movement alerts |
 | 2.4.0 | 2026-05 | Added Vega Impact Calculation section with detailed examples |
 | 2.5.0 | 2026-05 | Added Risk Attribution Report feature with explicit attribution percentages |
+| 2.6.0 | 2026-05 | Updated to reflect Risk Attribution Service (Module 9) |
