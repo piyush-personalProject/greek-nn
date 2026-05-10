@@ -23,6 +23,7 @@ let spotRatesPollInterval = null;
 let alertsPollInterval = null;
 let currentAlerts = { spot_alerts: [], risk_alerts: [] };
 let currentNewsFilter = 'portfolio';  // Default filter for news relevance
+let currentTimelineFilter = 'portfolio';  // Default filter for timeline
 let isLoading = false;  // Loading state for async operations
 let currentAttributionData = null;
 
@@ -384,7 +385,7 @@ function switchTab(tab) {
     // Show/hide Greek selector based on tab
     const greekSelector = document.getElementById('ladderGreekSelector');
     if (greekSelector) {
-        greekSelector.style.display = tab === 'ladder' ? 'flex' : 'none';
+        greekSelector.style.display = (tab === 'ladder') ? 'flex' : 'none';
     }
     
     // If switching to news tab, ensure data is loaded
@@ -404,6 +405,11 @@ function switchTab(tab) {
         }
     }
     
+    // If switching to timeline tab, ensure data is loaded
+    if (tab === 'timeline') {
+        loadTimeline(currentTimelineFilter);
+    }
+    
     console.log('Switched to tab:', tab);
 }
 
@@ -420,6 +426,166 @@ function onNewsFilterChange() {
         currentImpactData = null;  // Clear cache to force reload
         loadNewsWithImpact();
     }
+}
+
+// ==================== Timeline Functions ====================
+
+function onTimelineFilterChange() {
+    const filterSelect = document.getElementById('timelineFilterSelect');
+    if (filterSelect) {
+        currentTimelineFilter = filterSelect.value;
+        console.log('Timeline filter changed to:', currentTimelineFilter);
+        loadTimeline(currentTimelineFilter);
+    }
+}
+
+async function loadTimeline(filter = 'portfolio') {
+    try {
+        const response = await fetch(`/api/news-with-impact?max_results=20&filter=${filter}`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        renderTimeline(data.news_impacts || [], data.baseline_greeks);
+    } catch (error) {
+        console.error('Failed to load timeline:', error);
+    }
+}
+
+function renderTimeline(impacts, baselineGreeks) {
+    const container = document.getElementById('timelineContainer');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    if (!impacts || impacts.length === 0) {
+        container.innerHTML = `
+            <div class="timeline-empty">
+                <div class="timeline-empty-icon">📰</div>
+                <div class="timeline-empty-text">No news events in timeline</div>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort by published_at descending (most recent first)
+    const sortedImpacts = [...impacts].sort((a, b) => {
+        const dateA = new Date(a.published_at || 0);
+        const dateB = new Date(b.published_at || 0);
+        return dateB - dateA;
+    });
+    
+    sortedImpacts.forEach((item, index) => {
+        const timelineItem = createTimelineItem(item, baselineGreeks);
+        container.appendChild(timelineItem);
+    });
+}
+
+function createTimelineItem(item, baselineGreeks) {
+    const div = document.createElement('div');
+    div.className = 'timeline-item';
+    
+    const publishedDate = item.published_at ? new Date(item.published_at) : new Date();
+    const timeStr = publishedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateStr = publishedDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    
+    const sentiment = item.sentiment || 'neutral';
+    const sentimentClass = sentiment === 'positive' ? 'positive' : (sentiment === 'negative' ? 'negative' : 'neutral');
+    const eventTypeBadge = item.event_type || 'unknown';
+    
+    const impact = item.greeks_impact || {};
+    const vegaImpact = impact.vega || 0;
+    const deltaImpact = impact.delta || 0;
+    
+    // Calculate attribution percentages based on event type
+    const attributionWeights = getAttributionWeights(item.event_type);
+    
+    // Build vol shocks string
+    const volShocks = item.vol_shocks || {};
+    const volShocksHtml = Object.entries(volShocks).slice(0, 5).map(([key, val]) => {
+        return `<span class="timeline-vol-shock-item">${key}: ${typeof val === 'number' ? val.toFixed(3) : val}</span>`;
+    }).join('');
+    
+    // Affected pairs
+    const affectedPairsHtml = item.affected_pairs && item.affected_pairs.length > 0
+        ? `<div class="timeline-affected-pairs">
+            <span class="pairs-label">Affected:</span>
+            ${item.affected_pairs.map(pair => `<span class="pair-badge">${pair}</span>`).join('')}
+           </div>`
+        : '';
+    
+    div.innerHTML = `
+        <div class="timeline-dot ${sentimentClass}"></div>
+        <div class="timeline-card ${sentimentClass}">
+            <div class="timeline-card-header">
+                <div>
+                    <span class="news-time">${dateStr} ${timeStr}</span>
+                    <span class="event-type-badge ${eventTypeBadge}">${eventTypeBadge}</span>
+                    <span class="sentiment-badge ${sentimentClass}">${sentiment}</span>
+                </div>
+            </div>
+            <div class="news-headline">${item.headline || ''}</div>
+            
+            <div class="timeline-metrics">
+                <div class="timeline-metric">
+                    <span class="timeline-metric-label">Sentiment</span>
+                    <span class="timeline-metric-value">${(item.sentiment_score || 0).toFixed(2)}</span>
+                </div>
+                <div class="timeline-metric">
+                    <span class="timeline-metric-label">Importance</span>
+                    <span class="timeline-metric-value">${(item.importance || 0).toFixed(2)}</span>
+                </div>
+                <div class="timeline-metric">
+                    <span class="timeline-metric-label">Vega Impact</span>
+                    <span class="timeline-metric-value ${vegaImpact > 0 ? 'positive' : (vegaImpact < 0 ? 'negative' : '')}">${formatNumber(vegaImpact, 0)}</span>
+                </div>
+                <div class="timeline-metric">
+                    <span class="timeline-metric-label">Delta Impact</span>
+                    <span class="timeline-metric-value ${deltaImpact > 0 ? 'positive' : (deltaImpact < 0 ? 'negative' : '')}">${formatNumber(deltaImpact, 0)}</span>
+                </div>
+            </div>
+            
+            <div class="attribution-badges">
+                <span class="attribution-badge news" title="News headline attribution">📰 ${attributionWeights.news}% News</span>
+                <span class="attribution-badge drift" title="Historical volatility drift attribution">📊 ${attributionWeights.drift}% Vol Drift</span>
+                <span class="attribution-badge nn" title="Neural network model adjustment attribution">🤖 ${attributionWeights.nn}% NN</span>
+            </div>
+            
+            <div class="timeline-expand-indicator">Click to expand</div>
+            
+            <div class="timeline-details">
+                ${volShocksHtml ? `<div class="timeline-vol-shocks">${volShocksHtml}</div>` : ''}
+                ${affectedPairsHtml}
+                ${item.url ? `<a href="${item.url}" target="_blank" class="timeline-link">Read more →</a>` : ''}
+            </div>
+        </div>
+    `;
+    
+    // Toggle expand on click
+    div.querySelector('.timeline-card').addEventListener('click', () => {
+        div.classList.toggle('expanded');
+        const indicator = div.querySelector('.timeline-expand-indicator');
+        if (indicator) {
+            indicator.textContent = div.classList.contains('expanded') ? 'Click to collapse' : 'Click to expand';
+        }
+    });
+    
+    return div;
+}
+
+function getAttributionWeights(eventType) {
+    // Default attribution weights by event type
+    // These match the RiskAttributionService weights
+    const weights = {
+        INTEREST_RATE: { news: 55, drift: 25, nn: 20 },
+        INFLATION: { news: 50, drift: 30, nn: 20 },
+        EMPLOYMENT: { news: 45, drift: 35, nn: 20 },
+        CENTRAL_BANK: { news: 50, drift: 30, nn: 20 },
+        MACRO: { news: 40, drift: 40, nn: 20 },
+        UNKNOWN: { news: 30, drift: 50, nn: 20 }
+    };
+    
+    const normalizedType = (eventType || 'UNKNOWN').toUpperCase().replace('-', '_');
+    return weights[normalizedType] || weights.UNKNOWN;
 }
 
 // ==================== Loading Overlay ====================
@@ -498,6 +664,13 @@ function startAutoPolling() {
     
     // Initial load of combined impact
     loadCombinedImpact();
+    
+    // Start timeline polling for the timeline tab
+    setInterval(() => {
+        if (activeTab === 'timeline') {
+            loadTimeline(currentTimelineFilter);
+        }
+    }, NEWS_POLL_INTERVAL);
 }
 
 function startSpotRatesPolling() {
