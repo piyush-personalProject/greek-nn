@@ -2518,6 +2518,11 @@ body {
     border-bottom: 1px solid var(--border-color);
 }
 
+/* Attribution tab content - make it scrollable */
+#tab-attribution {
+    overflow-y: auto;
+}
+
 .attribution-header h3 {
     margin: 0;
     font-size: 16px;
@@ -2602,6 +2607,17 @@ body {
     border-bottom: 1px solid var(--border-color);
 }
 
+/* Vega Attribution - explicit visibility */
+#vegaAttribution,
+#deltaAttribution,
+#gammaAttribution,
+#thetaAttribution,
+#rhoAttribution {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
 .attribution-section h4 {
     margin: 0 0 8px 0;
     font-size: 13px;
@@ -2611,6 +2627,20 @@ body {
 
 .attribution-bar {
     min-height: 60px;
+    padding: 8px;
+    background-color: var(--bg-card);
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+/* Debug styling - can be removed after verification */
+.attribution-debug {
+    color: var(--accent-yellow);
+    font-size: 11px;
+    padding: 8px;
+    background-color: rgba(234, 179, 8, 0.1);
+    border-radius: 4px;
+    border: 1px dashed var(--accent-yellow);
 }
 
 .attribution-factors {

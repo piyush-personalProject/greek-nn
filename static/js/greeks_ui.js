@@ -1750,7 +1750,14 @@ async function loadRiskAttribution() {
         
         const response = await fetch('/api/risk-attribution-report?portfolio_id=FX-PORTFOLIO-01&min_vega_spike=10000');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            let errorDetail = '';
+            try {
+                const errorData = await response.json();
+                errorDetail = errorData.detail || '';
+            } catch (e) {
+                // Response wasn't JSON, use status text
+            }
+            throw new Error(`HTTP ${response.status}: ${errorDetail || response.statusText}`);
         }
         
         const data = await response.json();
@@ -1771,6 +1778,38 @@ async function loadRiskAttribution() {
         updateAttributionBar('thetaAttribution', data.theta_attribution);
         updateAttributionBar('rhoAttribution', data.rho_attribution);
         
+        // Force render vega attribution if it's empty but data exists
+        const vegaContainer = document.getElementById('vegaAttribution');
+        const colors = {
+            'news_headline': '#3b82f6',
+            'historical_vol_drift': '#f59e0b',
+            'nn_model_adjustment': '#a855f7',
+            'spot_rate_movement': '#06b6d4'
+        };
+        if (vegaContainer && data.vega_attribution && data.vega_attribution.length > 0) {
+            const isEmpty = !vegaContainer.innerHTML || vegaContainer.innerHTML.trim() === '' || vegaContainer.innerHTML.includes('No attribution data');
+            if (isEmpty) {
+                console.log('Force rendering vega attribution with', data.vega_attribution.length, 'factors');
+                let html = '<div class="attribution-factors">';
+                data.vega_attribution.forEach(factor => {
+                    const color = colors[factor.factor_type] || '#6b7280';
+                    const sourceLabel = factor.source || factor.factor_type;
+                    html += `<div class="attribution-factor">
+                        <div class="factor-header">
+                            <span class="factor-source" style="color:${color}">${sourceLabel}</span>
+                            <span class="factor-percentage">${(factor.percentage || 0).toFixed(1)}%</span>
+                        </div>
+                        <div class="factor-bar-bg">
+                            <div class="factor-bar-fill" style="width:${factor.percentage || 0}%;background-color:${color}"></div>
+                        </div>
+                        <div class="factor-description">${factor.description || ''}</div>
+                    </div>`;
+                });
+                html += '</div>';
+                vegaContainer.innerHTML = html;
+            }
+        }
+        
         // Check for vega spike
         if (data.vega_spike_report) {
             showVegaSpikeAlert(data.vega_spike_report);
@@ -1778,11 +1817,35 @@ async function loadRiskAttribution() {
             document.getElementById('vegaSpikeAlert').style.display = 'none';
         }
         
+        // Debug: verify vega attribution section has content
+        const vegaAttributionEl = document.getElementById('vegaAttribution');
+        if (vegaAttributionEl) {
+            console.log('Vega Attribution element found, innerHTML:', vegaAttributionEl.innerHTML);
+            if (!vegaAttributionEl.innerHTML || vegaAttributionEl.innerHTML.trim() === '' || vegaAttributionEl.innerHTML.includes('No attribution data')) {
+                console.log('WARNING: Vega Attribution section appears empty. Data received:', data.vega_attribution);
+                // Show debug info in the section
+                if (data.vega_attribution && data.vega_attribution.length > 0) {
+                    vegaAttributionEl.innerHTML = '<div class="attribution-debug">Vega attribution data received but not rendered. Check console.</div>';
+                }
+            }
+        }
+        
         hideLoading();
     } catch (error) {
         console.error('Failed to load risk attribution:', error);
         hideLoading();
-        showAlert('error', 'Error', 'Failed to load risk attribution report');
+        
+        // Provide more helpful error messages
+        let errorMessage = 'Failed to load risk attribution report';
+        
+        if (error.message && error.message.includes('Failed to fetch')) {
+            errorMessage = 'Cannot connect to API server. Please ensure the backend server is running on port 8000.';
+            console.error('Server connection error - check if API server is running');
+        } else if (error.message && error.message.includes('503')) {
+            errorMessage = 'Risk engine service unavailable. Check API server logs for details.';
+        }
+        
+        showAlert('error', 'Connection Error', errorMessage);
     }
 }
 
@@ -1824,32 +1887,42 @@ function updateAttributionGreeksTable(baseline, current, delta) {
 }
 
 function updateAttributionBar(containerId, attributionFactors) {
+    console.log('updateAttributionBar called:', containerId, attributionFactors);
     const container = document.getElementById(containerId);
-    if (!container || !attributionFactors || attributionFactors.length === 0) {
-        if (container) container.innerHTML = '<div class="attribution-empty">No attribution data</div>';
+    if (!container) {
+        console.log('Container not found:', containerId);
+        return;
+    }
+    if (!attributionFactors || attributionFactors.length === 0) {
+        console.log('No attribution factors for:', containerId);
+        container.innerHTML = '<div class="attribution-empty">No attribution data</div>';
         return;
     }
     
+    console.log('Building attribution HTML for:', containerId, 'factors:', attributionFactors.length);
     let html = '<div class="attribution-factors">';
+    // Color map based on factor_type (not source) for consistent coloring
     const colors = {
-        'News': '#3b82f6',
-        'Historical Vol Drift': '#f59e0b',
-        'NN Model Adjustment': '#a855f7'
+        'news_headline': '#3b82f6',
+        'historical_vol_drift': '#f59e0b',
+        'nn_model_adjustment': '#a855f7',
+        'spot_rate_movement': '#06b6d4'
     };
     
     attributionFactors.forEach(factor => {
-        const color = colors[factor.source] || '#6b7280';
+        const color = colors[factor.factor_type] || '#6b7280';
         const width = factor.percentage;
+        const sourceLabel = factor.source || factor.factor_type;
         
         html += `<div class="attribution-factor">
             <div class="factor-header">
-                <span class="factor-source" style="color:${color}">${factor.source}</span>
+                <span class="factor-source" style="color:${color}">${sourceLabel}</span>
                 <span class="factor-percentage">${factor.percentage.toFixed(1)}%</span>
             </div>
             <div class="factor-bar-bg">
                 <div class="factor-bar-fill" style="width:${width}%;background-color:${color}"></div>
             </div>
-            <div class="factor-description">${factor.description}</div>
+            <div class="factor-description">${factor.description || ''}</div>
         </div>`;
     });
     

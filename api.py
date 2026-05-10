@@ -138,6 +138,9 @@ async def startup_event():
     
     logger.info("Initializing FX Greeks Risk API...")
     
+    # Initialize audit service first (before other services that may depend on it)
+    init_audit_service(":memory:")
+    
     # Initialize risk engine (use auto mode to prefer ONNX, fallback to Black-Scholes)
     risk_engine = NNRiskEngine(model_mode="auto")
     
