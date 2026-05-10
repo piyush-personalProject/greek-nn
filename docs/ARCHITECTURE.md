@@ -123,6 +123,20 @@ The GreekNN Risk System is a portfolio risk management library that processes ne
 │  └────────────────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                                      │
 │  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    MODULE 9: RISK ATTRIBUTION (services/risk_attribution_service.py)             │ │
+│  │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐    │ │
+│  │  │  RiskAttributionService                                                                  │    │ │
+│  │  │  ├── Break down Greek changes into explicit attribution percentages                   │    │ │
+│  │  │  ├── News Headlines attribution (NLP → Vol Shock)                                     │    │ │
+│  │  │  ├── Historical Vol Drift attribution (natural market movement)                       │    │ │
+│  │  │  ├── NN Model Adjustment attribution (neural network corrections)                     │    │ │
+│  │  │  ├── Vega spike detection ($10K+ threshold) with special report                       │    │ │
+│  │  │  ├── Primary driver identification                                                     │    │ │
+│  │  │  └── Confidence scoring for attributions                                               │    │ │
+│  │  └─────────────────────────────────────────────────────────────────────────────────────────┘    │ │
+│  └────────────────────────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                                      │
+│  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐ │
 │  │                              DATA MODELS (schemas.py)                                         │ │
 │  │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐    │ │
 │  │  │  NewsEvent, EventVector, VolShock, VolSurface, Portfolio, Greeks, RiskAlert            │    │ │
@@ -718,7 +732,9 @@ greek_nn/
 ├── vol_surface_service.py    # Module 4: Vol surface management
 ├── services/                 # Service modules
 │   ├── alert_service.py      # Module 6: Alert system
-│   └── forex_service.py      # Module 7: Forex spot rate service
+│   ├── audit_service.py     # Module 8: Audit service
+│   ├── forex_service.py      # Module 7: Forex spot rate service
+│   └── risk_attribution_service.py  # Module 9: Risk attribution
 ├── requirements.txt          # Python dependencies
 ├── run_tests.py             # Test runner
 ├── pytest.ini               # Pytest configuration

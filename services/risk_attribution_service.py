@@ -269,7 +269,8 @@ class RiskAttributionService:
                     "importance": news_event.importance,
                     "surprise_factor": news_event.surprise_factor,
                     "vol_shock_1M_ATM": vol_shock.delta_1M_ATM if vol_shock else None
-                }
+                },
+                url=news_event.url
             ))
             
             # 2. Historical vol drift attribution
@@ -370,7 +371,8 @@ class RiskAttributionService:
                 "sentiment_score": news_event.sentiment_score,
                 "importance": news_event.importance,
                 "headline": news_event.headline[:200]
-            }
+            },
+            url=news_event.url
         ))
         
         # Historical vol drift

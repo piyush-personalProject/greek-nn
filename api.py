@@ -748,7 +748,8 @@ async def compute_impacted_greeks(
                 surprise_factor=0.3,
                 entities={"central_banks": [], "currencies": [], "indicators": []},
                 processed_at=datetime.now(),
-                source="api"
+                source="api",
+                url=f"https://news.example.com/shock/{vol_shock_id}"
             )
             vol_shock = vol_shock_model.predict_shock(event_vector)
             
@@ -2106,7 +2107,8 @@ async def get_risk_attribution_report(
                         "factor_type": f.factor_type,
                         "source": f.source,
                         "percentage": f.percentage,
-                        "description": f.description
+                        "description": f.description,
+                        "url": f.url
                     }
                     for f in report.delta_attribution
                 ],
@@ -2115,7 +2117,8 @@ async def get_risk_attribution_report(
                         "factor_type": f.factor_type,
                         "source": f.source,
                         "percentage": f.percentage,
-                        "description": f.description
+                        "description": f.description,
+                        "url": f.url
                     }
                     for f in report.gamma_attribution
                 ],
@@ -2124,7 +2127,8 @@ async def get_risk_attribution_report(
                         "factor_type": f.factor_type,
                         "source": f.source,
                         "percentage": f.percentage,
-                        "description": f.description
+                        "description": f.description,
+                        "url": f.url
                     }
                     for f in report.vega_attribution
                 ],
@@ -2133,7 +2137,8 @@ async def get_risk_attribution_report(
                         "factor_type": f.factor_type,
                         "source": f.source,
                         "percentage": f.percentage,
-                        "description": f.description
+                        "description": f.description,
+                        "url": f.url
                     }
                     for f in report.theta_attribution
                 ],
@@ -2142,7 +2147,8 @@ async def get_risk_attribution_report(
                         "factor_type": f.factor_type,
                         "source": f.source,
                         "percentage": f.percentage,
-                        "description": f.description
+                        "description": f.description,
+                        "url": f.url
                     }
                     for f in report.rho_attribution
                 ],
@@ -2171,7 +2177,8 @@ async def get_risk_attribution_report(
                             "factor_type": f.factor_type,
                             "source": f.source,
                             "percentage": f.percentage,
-                            "description": f.description
+                            "description": f.description,
+                            "url": f.url
                         }
                         for f in report.vega_spike_report.attribution_factors
                     ],

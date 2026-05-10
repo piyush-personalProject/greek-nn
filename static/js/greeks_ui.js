@@ -1940,11 +1940,12 @@ function updateAttributionBar(containerId, attributionFactors) {
         const color = colors[factor.factor_type] || '#6b7280';
         const width = factor.percentage;
         const sourceLabel = factor.source || factor.factor_type;
+        const newsLink = factor.url ? `<a href="${factor.url}" target="_blank" class="news-link attribution-news-link">[Source ↗]</a>` : '';
         
         html += `<div class="attribution-factor">
             <div class="factor-header">
                 <span class="factor-source" style="color:${color}">${sourceLabel}</span>
-                <span class="factor-percentage">${factor.percentage.toFixed(1)}%</span>
+                <span class="factor-percentage">${factor.percentage.toFixed(1)}%</span>${newsLink}
             </div>
             <div class="factor-bar-bg">
                 <div class="factor-bar-fill" style="width:${width}%;background-color:${color}"></div>

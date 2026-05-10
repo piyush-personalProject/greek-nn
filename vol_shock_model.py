@@ -401,7 +401,8 @@ class VolShockModel:
             surprise_factor=float(features[0, 2]),
             entities={"central_banks": [], "currencies": [], "indicators": []},
             processed_at=datetime.now(),
-            source="fallback"
+            source="fallback",
+            url=None
         )
     
     def _predict_rulebased(self, event_vector: EventVector) -> List[float]:
@@ -672,7 +673,8 @@ class VolShockModel:
                 surprise_factor=surprise_factor,
                 entities={"central_banks": [], "currencies": [], "indicators": []},
                 processed_at=datetime.now(),
-                source="training"
+                source="training",
+                url=None
             )
             
             # Use rule-based model as ground truth

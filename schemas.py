@@ -59,6 +59,7 @@ class EventVector(BaseModel):
     entities: Dict[str, List[str]] = Field(default_factory=dict)
     processed_at: datetime
     source: str
+    url: Optional[str] = Field(None, description="URL link to the original news article")
 
 
 class VolShock(BaseModel):
@@ -502,12 +503,14 @@ class RiskAttributionFactor(BaseModel):
         percentage: Percentage of total risk attributed to this factor (0-100)
         description: Detailed description of how this factor contributed
         evidence: Supporting evidence for this attribution
+        url: Optional URL link to the original news article (for news_headline factors)
     """
     factor_type: str = Field(..., description="Type: news_headline, historical_vol_drift, nn_model_adjustment, spot_rate_movement")
     source: str = Field(..., description="Source identifier or headline")
     percentage: float = Field(..., ge=0.0, le=100.0, description="Attribution percentage (0-100)")
     description: str = Field(..., description="How this factor contributed")
     evidence: Dict[str, Any] = Field(default_factory=dict, description="Supporting metrics and data")
+    url: Optional[str] = Field(None, description="URL link to original news article for news_headline factors")
 
 
 class VegaSpikeAttribution(BaseModel):

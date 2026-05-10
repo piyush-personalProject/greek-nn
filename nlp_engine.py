@@ -164,7 +164,8 @@ class NLPEngine:
             surprise_factor=surprise_factor,
             entities=entities,
             processed_at=datetime.now(),
-            source=news_event.source
+            source=news_event.source,
+            url=news_event.url
         )
         
         # Cache the result
@@ -610,7 +611,8 @@ class NLPEngine:
             surprise_factor=0.5,
             entities={"central_banks": [], "currencies": [], "indicators": []},
             processed_at=datetime.now(),
-            source=news_event.source
+            source=news_event.source,
+            url=news_event.url
         )
     
     def health_check(self) -> Dict[str, str]:

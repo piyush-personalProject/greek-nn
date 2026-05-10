@@ -70,7 +70,8 @@ greek_nn/
 ├── services/                 # Service modules
 │   ├── alert_service.py      # Module 6: Alert System (spot rate & risk alerts)
 │   ├── audit_service.py     # Module 8: Audit Service (pipeline traceability)
-│   └── forex_service.py      # Module 7: Live forex spot rate integration
+│   ├── forex_service.py      # Module 7: Live forex spot rate integration
+│   └── risk_attribution_service.py  # Module 9: Risk Attribution (explicit percentage breakdown)
 ├── requirements.txt          # Python dependencies
 ├── run_tests.py             # Test runner script
 ├── pytest.ini               # Pytest configuration
