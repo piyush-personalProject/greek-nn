@@ -53,7 +53,7 @@ DEFAULT_FX_CORRELATIONS = {
     ("GBPUSD", "NZDUSD"): 0.75,
     ("AUDUSD", "NZDUSD"): 0.90,
     ("USDCAD", "AUDUSD"): 0.60,
-    ("USDCHF", " GBPUSD"): 0.65,
+    ("USDCHF", "GBPUSD"): 0.65,
 }
 
 # Predefined crisis correlation multipliers (correlations tend to 1.0 during crises)
