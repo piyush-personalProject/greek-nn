@@ -1020,10 +1020,32 @@ async function loadNewsWithImpact() {
     }
 }
 
-async function loadNews() {
-    // Deprecated: Use loadNewsWithImpact() instead - it fetches news AND impact in single call
-    // Kept for backward compatibility but does nothing now
-    console.log('loadNews is deprecated - use loadNewsWithImpact');
+function refreshNews() {
+    console.log('Manual news refresh triggered');
+    showLoading();
+    
+    // Clear current data to force fresh fetch
+    currentImpactData = null;
+    excludedHeadlines = [];  // Reset exclusions on manual refresh
+    
+    // Hide reset button if visible
+    const resetBtn = document.getElementById('resetNewsBtn');
+    if (resetBtn) resetBtn.style.display = 'none';
+    
+    // Load fresh news data
+    loadNewsWithImpact();
+    
+    // Also refresh timeline if it's the active tab
+    if (activeTab === 'timeline') {
+        loadTimeline(currentTimelineFilter);
+    }
+    
+    // Refresh correlation risk if it has data
+    if (currentCorrelationData) {
+        loadCorrelationRisk();
+    }
+    
+    showAlert('info', 'Refreshing', 'Fetching latest news and recalculating impacts...');
 }
 
 function showNewsError(message) {
@@ -1228,7 +1250,7 @@ function updateNewsImpactList(impacts) {
     let displayImpacts = impacts || [];
     
     if (!displayImpacts || displayImpacts.length === 0) {
-        container.innerHTML = '<div class="news-empty">No news impact data available (filtered by sentiment score)</div>';
+        container.innerHTML = '<div class="news-empty">No news impact data available</div>';
         // Update summary metrics
         const activeCountEl = document.getElementById('activeNewsCount');
         const totalImpactEl = document.getElementById('totalImpact');

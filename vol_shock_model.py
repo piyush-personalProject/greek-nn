@@ -655,7 +655,7 @@ class VolShockModel:
         
         training_data = []
         
-        for _ in range(num_samples):
+        for i in range(num_samples):
             # Random event properties
             event_type = random.choice(list(EventType))
             sentiment = random.choice(list(Sentiment))
@@ -680,8 +680,16 @@ class VolShockModel:
             # Use rule-based model as ground truth
             deltas = self._predict_rulebased(event_vector)
             
+            self.logger.debug(
+                f"[{i+1}/{num_samples}] Generated sample: "
+                f"event_type={event_type.value}, sentiment={sentiment.value}, "
+                f"sentiment_score={sentiment_score:.3f}, importance={importance:.3f}, "
+                f"surprise_factor={surprise_factor:.3f} -> deltas={deltas}"
+            )
+            
             training_data.append((event_vector, deltas))
         
+        self.logger.info(f"Generated {num_samples} training samples")
         return training_data
     
     def health_check(self) -> Dict[str, str]:

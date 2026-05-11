@@ -1592,6 +1592,7 @@ async def get_news_with_impact(
             # Fetch recent news ONCE
             headlines = await news_service.fetch_all_headlines()
             headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:max_results]
+            original_count = len(headlines)
 
             impact_results = []
 
@@ -1689,11 +1690,7 @@ async def get_news_with_impact(
             else:
                 impact_results = sorted(impact_results, key=lambda x: x["sentiment_score"], reverse=True)
             
-            # Filter by minimum absolute sentiment score
-            original_count = len(impact_results)
-            impact_results = [r for r in impact_results if abs(r["sentiment_score"]) >= min_sentiment_score]
-            
-            span.log(f"Processed {original_count} news with impact, filtered to {len(impact_results)} with |sentiment_score| >= {min_sentiment_score}")
+            span.log(f"Processed {len(impact_results)} news with impact")
             
             return {
                 "timestamp": datetime.now().isoformat(),
