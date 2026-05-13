@@ -172,8 +172,9 @@ This document maps system requirements to implementation components and test cas
 | Forex Service | `test_forex_service.py` | 15+ | Rate fetching, baseline tracking |
 | Audit Service | `test_audit_service.py` | 10+ | Trace lifecycle, persistence |
 | Correlation Service | `test_correlation_service.py` | 20+ | Correlation matrix, stress testing, adjusted Greeks |
+| Enterprise Module | `test_enterprise.py` | 30+ | Retry, circuit breaker, rate limiter, exceptions |
 | Schemas | `test_schemas.py` | 22 | Validation, enums, edge cases |
-| **Total** | | **166+** | |
+| **Total** | | **200+** | |
 
 ---
 
@@ -231,3 +232,4 @@ Portfolio Positions → CorrelationService.analyze_position_correlations()
 | 2024-01 | 1.0.0 | Initial traceability matrix |
 | 2026-04 | 2.0.0 | Added API server traceability, updated test counts |
 | 2026-05 | 3.0.0 | Added Module 10 (Correlation Service) traceability, updated total test count to 166+ |
+| 2026-05 | 4.0.0 | Added Enterprise Module traceability (retry, circuit breaker, rate limiter), total test count 200+ |

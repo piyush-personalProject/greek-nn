@@ -1179,3 +1179,4 @@ class VegaSpikeAttribution(BaseModel):
 | 2.5.0 | 2026-05 | Added Risk Attribution Report feature with explicit attribution percentages |
 | 2.6.0 | 2026-05 | Updated to reflect Risk Attribution Service (Module 9) |
 | 2.7.0 | 2026-05 | Added Module 10: Correlation Service for cross-asset correlation risk |
+| 2.8.0 | 2026-05 | Added Enterprise Module: retry, circuit breaker, rate limiter, exceptions |

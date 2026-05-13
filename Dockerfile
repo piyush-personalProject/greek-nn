@@ -35,8 +35,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=appuser:appgroup . .
 
-# Create models directory
-RUN mkdir -p /app/models && chown appuser:appgroup /app/models
+# Create required directories
+RUN mkdir -p /app/models /app/logs /app/data /app/cache && \
+    chown appuser:appgroup /app/models /app/logs /app/data /app/cache
+
+# Environment defaults for production
+ENV ENVIRONMENT=production
+ENV LOG_LEVEL=INFO
+ENV PYTHONUNBUFFERED=1
 
 # Switch to non-root user
 USER appuser
@@ -44,9 +50,10 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/api/health')"
+# Health check using FastAPI health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run application
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run application with gunicorn for production
+# Use 2 workers + 1 for gunicorn master = 3 processes
+CMD ["sh", "-c", "gunicorn api:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --access-logfile - --error-logfile -"]
