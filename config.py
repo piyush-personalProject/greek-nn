@@ -120,7 +120,7 @@ class AppConfig:
     enable_news_ingestion: bool = field(default_factory=lambda: os.getenv("ENABLE_NEWS", "true").lower() == "true")
     enable_nlp_engine: bool = field(default_factory=lambda: os.getenv("ENABLE_NLP", "true").lower() == "true")
     enable_vol_shock: bool = field(default_factory=lambda: os.getenv("ENABLE_VOL_SHOCK", "true").lower() == "true")
-    enable_alerts: bool = field(default_factory=lambda: os.getenv("ENABLE_ALERTS", "false").lower() == "true")
+    enable_alerts: bool = field(default_factory=lambda: os.getenv("ENABLE_ALERTS", "true").lower() == "true")
     enable_live_spot_rates: bool = field(default_factory=lambda: os.getenv("ENABLE_LIVE_SPOT", "true").lower() == "true")
     
     def __post_init__(self):

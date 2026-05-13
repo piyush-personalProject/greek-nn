@@ -8,7 +8,7 @@ http://localhost:8000
 
 ## API Overview
 
-The FX Greeks Risk API provides real-time Greeks visualization for FX spot and options portfolios. It includes portfolio management, Greeks computation, time ladder analysis, and real-time WebSocket updates.
+The FX Greeks Risk API provides real-time Greeks visualization for FX spot and options portfolios. It includes portfolio management, Greeks computation, time ladder analysis, news impact analysis, correlation risk management, and real-time WebSocket updates.
 
 ## Endpoints
 
@@ -33,7 +33,10 @@ Health check endpoint for monitoring.
     "timestamp": "2026-04-27T12:00:00.000000",
     "services": {
         "risk_engine": {"nn_risk_engine": "healthy", "model_mode": "blackscholes"},
-        "vol_surface": {"status": "healthy"}
+        "vol_surface": {"status": "healthy"},
+        "forex_service": {"status": "healthy"},
+        "alert_service": {"status": "healthy"},
+        "correlation_service": {"status": "healthy"}
     }
 }
 ```
@@ -91,6 +94,43 @@ Get portfolio details including all positions.
 
 ---
 
+### `GET /api/portfolios/{portfolio_id}/greeks`
+
+Get Greeks for a portfolio (read-only view).
+
+**Parameters:**
+- `portfolio_id` (path): Portfolio identifier
+
+**Response:**
+```json
+{
+    "portfolio_id": "FX-PORTFOLIO-01",
+    "timestamp": "2026-04-27T12:00:00.000000",
+    "total_greeks": {
+        "delta": 450000.0,
+        "gamma": 12000.0,
+        "vega": 85000.0,
+        "theta": -1500.0,
+        "rho": 32000.0,
+        "vanna": null,
+        "volga": null
+    },
+    "position_greeks": {
+        "TRADE-001": {
+            "delta": 450000.0,
+            "gamma": 12000.0,
+            "vega": 85000.0,
+            "theta": -1500.0,
+            "rho": 32000.0,
+            "vanna": null,
+            "volga": null
+        }
+    }
+}
+```
+
+---
+
 ### `POST /api/portfolios/{portfolio_id}/greeks`
 
 Compute Greeks for a portfolio (spot horizon view).
@@ -127,6 +167,18 @@ Compute Greeks for a portfolio (spot horizon view).
     }
 }
 ```
+
+---
+
+### `POST /api/portfolios/{portfolio_id}/greeks/impacted`
+
+Compute Greeks impacted by specific news exclusion.
+
+**Parameters:**
+- `portfolio_id` (path): Portfolio identifier
+- `excluded_news_ids` (body, optional): List of news event IDs to exclude
+
+**Response:** Same structure as `/greeks` endpoint
 
 ---
 
@@ -179,6 +231,78 @@ Get current spot rates.
 
 ---
 
+### `GET /api/spot-rates/live`
+
+Get live spot rates fetched from external APIs.
+
+**Response:**
+```json
+{
+    "timestamp": "2026-04-27T12:00:00.000000",
+    "source": "frankfurter",
+    "rates": {
+        "EURUSD": 1.085,
+        "USDJPY": 149.5,
+        "GBPUSD": 1.265
+    }
+}
+```
+
+---
+
+### `GET /api/spot-rates/history`
+
+Get historical spot rate data.
+
+**Parameters:**
+- `pair` (query, optional): Currency pair (e.g., "EURUSD")
+- `days` (query, optional): Number of days of history (default: 30)
+
+**Response:**
+```json
+{
+    "pair": "EURUSD",
+    "days": 30,
+    "history": [
+        {"timestamp": "2026-04-27T12:00:00.000000", "rate": 1.085},
+        {"timestamp": "2026-04-26T12:00:00.000000", "rate": 1.084}
+    ]
+}
+```
+
+---
+
+### `GET /api/spot-rates/changes`
+
+Get spot rate changes from baseline.
+
+**Response:**
+```json
+{
+    "timestamp": "2026-04-27T12:00:00.000000",
+    "changes": {
+        "EURUSD": {"change": 0.001, "change_pct": 0.09},
+        "USDJPY": {"change": -0.2, "change_pct": -0.13}
+    }
+}
+```
+
+---
+
+### `POST /api/spot-rates/baseline`
+
+Update baseline rates to current rates.
+
+**Response:**
+```json
+{
+    "status": "success",
+    "message": "Baseline rates updated"
+}
+```
+
+---
+
 ### `GET /api/vol-surface`
 
 Get current vol surface summary.
@@ -224,6 +348,353 @@ Get comprehensive risk summary for dashboard.
 
 ---
 
+### `GET /api/news`
+
+Get recent news headlines.
+
+**Parameters:**
+- `keyword` (query, optional): Filter by keyword
+- `max_results` (query, optional): Maximum number of results (default: 20)
+
+**Response:**
+```json
+{
+    "timestamp": "2026-04-27T12:00:00.000000",
+    "news": [
+        {
+            "headline": "Fed signals potential rate cuts",
+            "source": "Reuters",
+            "url": "https://reuters.com/...",
+            "published_at": "2026-04-27T10:30:00.000000",
+            "event_type": "INTEREST_RATE",
+            "sentiment": "NEGATIVE",
+            "sentiment_score": -0.73
+        }
+    ]
+}
+```
+
+---
+
+### `POST /api/news/refresh`
+
+Force refresh of news headlines.
+
+**Response:**
+```json
+{
+    "status": "success",
+    "count": 15,
+    "timestamp": "2026-04-27T12:00:00.000000"
+}
+```
+
+---
+
+### `GET /api/news-with-impact`
+
+Get news with calculated impact on Greeks.
+
+**Parameters:**
+- `max_results` (query, optional): Maximum number of results (default: 10)
+- `portfolio_id` (query, optional): Portfolio ID (default: "FX-PORTFOLIO-01")
+
+**Response:**
+```json
+{
+    "timestamp": "2026-04-27T12:00:00.000000",
+    "news_with_impact": [
+        {
+            "news_event": {...},
+            "event_vector": {...},
+            "greeks_impact": {"delta": -2000, "gamma": -500, "vega": -3000},
+            "vol_shocks": {"1W_ATM": -0.002, "1M_ATM": -0.003}
+        }
+    ]
+}
+```
+
+---
+
+### `GET /api/news-impact`
+
+Get news with calculated impact on Greeks (alternative endpoint).
+
+**Parameters:**
+- `max_results` (query, optional): Maximum number of results (default: 10)
+
+**Response:** Same structure as `/news-with-impact`
+
+---
+
+### `POST /api/news/exclude`
+
+Compute Greeks with excluded news events.
+
+**Parameters:**
+- `excluded_news_ids` (body): List of news event IDs to exclude
+
+**Response:** Greeks computation with partial news impact
+
+---
+
+### `GET /api/risk-attribution-report`
+
+Generate risk attribution report with explicit percentage breakdown.
+
+**Parameters:**
+- `portfolio_id` (query, optional): Portfolio ID
+- `min_vega_spike` (query, optional): Minimum vega spike threshold
+
+**Response:**
+```json
+{
+    "report": {
+        "report_id": "attr-20260513-001",
+        "portfolio_id": "FX-PORTFOLIO-01",
+        "timestamp": "2026-05-13T12:00:00.000000",
+        "baseline_greeks": {...},
+        "current_greeks": {...},
+        "greeks_delta": {...},
+        "delta_attribution": [...],
+        "gamma_attribution": [...],
+        "vega_attribution": [...],
+        "theta_attribution": [...],
+        "rho_attribution": [...],
+        "primary_driver": "News Headlines",
+        "confidence_score": 0.85
+    }
+}
+```
+
+---
+
+### `POST /api/impact/combined`
+
+Get combined spot and vol shock impact on Greeks.
+
+**Parameters:**
+- `portfolio_id` (body): Portfolio identifier
+- `spot_shock_pct` (body, optional): Spot rate shock percentage
+- `vol_shock_ids` (body, optional): List of vol shock IDs
+
+**Response:**
+```json
+{
+    "combined_impact": {
+        "spot_impact": {...},
+        "vol_impact": {...},
+        "total_impact": {...}
+    }
+}
+```
+
+---
+
+### `GET /api/alerts/spot-rates`
+
+Get spot rate alerts.
+
+**Parameters:**
+- `since_minutes` (query, optional): Filter alerts within time window
+
+**Response:**
+```json
+{
+    "alerts": [
+        {
+            "alert_id": "spot-EURUSD-001",
+            "alert_type": "SpotRateAlert",
+            "pair": "EURUSD",
+            "change_pct": 0.5,
+            "severity": "medium",
+            "message": "EURUSD moved 0.5%",
+            "timestamp": "2026-04-27T12:00:00.000000"
+        }
+    ]
+}
+```
+
+---
+
+### `GET /api/alerts/all`
+
+Get all active alerts.
+
+**Response:**
+```json
+{
+    "spot_alerts": [...],
+    "risk_alerts": [...],
+    "total_count": 5
+}
+```
+
+---
+
+### `POST /api/alerts/{alert_id}/acknowledge`
+
+Acknowledge an alert.
+
+**Parameters:**
+- `alert_id` (path): Alert identifier
+
+**Response:**
+```json
+{
+    "status": "success",
+    "alert_id": "spot-EURUSD-001"
+}
+```
+
+---
+
+### `GET /api/correlation-matrix`
+
+Get current FX correlation matrix.
+
+**Response:**
+```json
+{
+    "matrix_id": "fx-default",
+    "pairs": ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"],
+    "correlations": {
+        "EURUSD-GBPUSD": 0.85,
+        "EURUSD-USDJPY": -0.65,
+        "EURUSD-USDCHF": 0.70
+    },
+    "last_updated": "2026-04-27T12:00:00.000000"
+}
+```
+
+---
+
+### `GET /api/correlation-risk-report`
+
+Get full correlation risk analysis report.
+
+**Parameters:**
+- `portfolio_id` (query, optional): Portfolio ID
+
+**Response:**
+```json
+{
+    "report": {
+        "portfolio_id": "FX-PORTFOLIO-01",
+        "timestamp": "2026-04-27T12:00:00.000000",
+        "correlation_matrix": {...},
+        "diversification_ratio": 1.25,
+        "correlation_risk_score": 0.45,
+        "positions_correlation_info": [...],
+        "risk_contribution_by_pair": {...},
+        "warnings": []
+    }
+}
+```
+
+---
+
+### `GET /api/correlation-adjusted`
+
+Get correlation-adjusted Greeks for the portfolio.
+
+**Parameters:**
+- `portfolio_id` (query, optional): Portfolio ID
+
+**Response:**
+```json
+{
+    "portfolio_id": "FX-PORTFOLIO-01",
+    "correlation_adjusted_greeks": {
+        "delta": 420000,
+        "gamma": 11500,
+        "vega": 78000,
+        "theta": -1450,
+        "rho": 30000
+    },
+    "adjustment_explanation": "Correlations reduced delta by 6.7%"
+}
+```
+
+---
+
+### `POST /api/correlation-adjusted-with-event`
+
+Get correlation-adjusted Greeks with a specific event applied.
+
+**Parameters:**
+- `portfolio_id` (body): Portfolio ID
+- `event_vector` (body): Event vector to simulate
+
+**Response:** Same as `/correlation-adjusted` with event applied
+
+---
+
+### `GET /api/correlation-change-report`
+
+Get report of correlation changes caused by news events.
+
+**Response:**
+```json
+{
+    "changes": [
+        {
+            "pair": "EURUSD-GBPUSD",
+            "old_correlation": 0.85,
+            "new_correlation": 0.82,
+            "change": -0.03,
+            "triggered_by": "ECB policy divergence headline",
+            "timestamp": "2026-04-27T12:00:00.000000"
+        }
+    ]
+}
+```
+
+---
+
+### `GET /api/correlation-stress-scenarios`
+
+Get available correlation stress test scenarios.
+
+**Response:**
+```json
+{
+    "scenarios": [
+        {"id": "lehman_2008", "name": "2008 Lehman Crisis", "description": "Extreme correlation during 2008 financial crisis"},
+        {"id": "covid_2020", "name": "COVID 2020", "description": "Pandemic-driven correlation shifts"},
+        {"id": "em_stress", "name": "EM Stress", "description": "Emerging market correlation spike"},
+        {"id": "risk_on_risk_off", "name": "Risk-On/Risk-Off", "description": "Flight to safety correlation pattern"}
+    ]
+}
+```
+
+---
+
+### `POST /api/correlation-stress-test`
+
+Run correlation stress test with a specific scenario.
+
+**Parameters:**
+- `scenario_id` (body): Scenario ID to apply
+- `portfolio_id` (body, optional): Portfolio ID
+
+**Response:**
+```json
+{
+    "scenario": "lehman_2008",
+    "portfolio_id": "FX-PORTFOLIO-01",
+    "correlation_multiplier": 1.5,
+    "stressed_correlations": {...},
+    "impact_on_greeks": {
+        "delta_change": -15000,
+        "gamma_change": -800,
+        "vega_change": -5000
+    }
+}
+```
+
+---
+
 ### `WebSocket /ws/greeks`
 
 WebSocket endpoint for real-time Greeks updates. Sends periodic tick updates every second.
@@ -240,8 +711,10 @@ WebSocket endpoint for real-time Greeks updates. Sends periodic tick updates eve
 ```
 
 **Events broadcast:**
+- `tick`: Periodic Greeks update (every 1 second)
 - `trade_added`: When a new trade is added
 - `trade_removed`: When a trade is deleted
+- `spot_rate_alert`: When spot rate movement triggers alert
 
 ---
 
@@ -249,7 +722,7 @@ WebSocket endpoint for real-time Greeks updates. Sends periodic tick updates eve
 
 Create a new trade (maker/dealer function).
 
-**Request Body (query parameters):**
+**Request Body:**
 - `instrument` (required): Trading instrument (e.g., EURUSD)
 - `strike` (required): Strike price
 - `tenor` (required): Time to expiration in years
@@ -290,6 +763,74 @@ Delete a trade from portfolio.
 {
     "status": "success",
     "trade_id": "TRADE-001"
+}
+```
+
+---
+
+### `GET /api/audit/trace/{trace_id}`
+
+Get full pipeline trace with all stages.
+
+**Parameters:**
+- `trace_id` (path): Trace identifier
+
+**Response:**
+```json
+{
+    "trace": {
+        "trace_id": "news-batch-20260504-070551",
+        "created_at": "2026-05-04T07:05:51",
+        "status": "completed",
+        "completed_at": "2026-05-04T07:05:52"
+    },
+    "news_events": [...],
+    "event_vectors": [...],
+    "vol_shocks": [...],
+    "vol_surfaces": [...],
+    "greeks_snapshots": [...]
+}
+```
+
+---
+
+### `GET /api/audit/traces`
+
+List recent audit traces.
+
+**Parameters:**
+- `limit` (query, optional): Maximum number of traces (default: 20)
+- `status` (query, optional): Filter by status (active, completed)
+
+**Response:**
+```json
+{
+    "traces": [
+        {
+            "trace_id": "news-batch-20260504-070551",
+            "created_at": "2026-05-04T07:05:51",
+            "status": "completed"
+        }
+    ],
+    "total_count": 15
+}
+```
+
+---
+
+### `POST /api/audit/trace/{trace_id}/end`
+
+Mark trace as completed.
+
+**Parameters:**
+- `trace_id` (path): Trace identifier
+- `status` (query, optional): Final status (default: "completed")
+
+**Response:**
+```json
+{
+    "status": "success",
+    "trace_id": "news-batch-20260504-070551"
 }
 ```
 
@@ -376,6 +917,8 @@ The API has CORS enabled for all origins to support local development.
 
 Rate limits are not currently enforced. The API is designed for internal front-office use.
 
+---
+
 ## Authentication
 
 Currently open. Auth implementation planned for future release.
@@ -387,3 +930,4 @@ Currently open. Auth implementation planned for future release.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-04-27 | Initial API implementation with portfolio management, Greeks computation, time ladder, and WebSocket updates |
+| 1.1.0 | 2026-05-13 | Added correlation risk endpoints (Module 10), live spot rates, enhanced alerts, news exclusion, and combined impact endpoints |

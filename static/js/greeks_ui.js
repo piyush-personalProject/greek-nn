@@ -250,7 +250,8 @@ async function loadInitialData() {
         await Promise.all([
             loadGreeks(),
             loadTimeLadder(),
-            loadSpotRates(),
+            loadLiveSpotRates(),  // Use live endpoint at startup
+            loadSpotRateChanges(),  // Also load spot rate changes
             loadVolSurface(),
             loadPortfolioPositions()
         ]);

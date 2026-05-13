@@ -68,7 +68,17 @@ This document maps system requirements to implementation components and test cas
 | AL-002 | Alert with exceeded value | `RiskAlert.exceeded_by` | `test_schemas.py` | `test_valid_risk_alert` |
 | AL-003 | Action recommendations | `RiskAlert.action_recommended` | `test_schemas.py` | `test_valid_risk_alert` |
 
-### Module 7: Audit Service (SQLite In-Memory)
+### Module 7: Forex Service
+
+| Requirement ID | Requirement Description | Component | Test File | Test Cases |
+|----------------|------------------------|-----------|-----------|------------|
+| FX-001 | Live spot rate fetching | `ForexService.fetch_rates()` | `test_forex_service.py` | `test_fetch_rates_*` |
+| FX-002 | Multi-currency support | ForexService.supported_pairs | `test_forex_service.py` | `test_supported_pairs` |
+| FX-003 | Baseline rate tracking | `update_baseline()` | `test_forex_service.py` | `test_update_baseline` |
+| FX-004 | Rate change calculation | `get_rate_change()` | `test_forex_service.py` | `test_get_rate_change_*` |
+| FX-005 | Mock mode fallback | `_get_mock_rate()` | `test_forex_service.py` | `test_fetch_rates_no_api_key` |
+
+### Module 8: Audit Service (SQLite In-Memory)
 
 | Requirement ID | Requirement Description | Component | Test File | Test Cases |
 |----------------|------------------------|-----------|-----------|------------|
@@ -81,6 +91,19 @@ This document maps system requirements to implementation components and test cas
 | AU-007 | Full trace retrieval | `get_trace()` | `test_audit_service.py` | `test_get_trace` |
 | AU-008 | Thread-safe connections | `_get_connection()` | `test_audit_service.py` | `test_concurrent_access` |
 
+### Module 10: Correlation Service
+
+| Requirement ID | Requirement Description | Component | Test File | Test Cases |
+|----------------|------------------------|-----------|-----------|------------|
+| CORR-001 | FX correlation matrix management | `CorrelationService` | `test_correlation_service.py` | `test_initialization`, `test_default_matrix` |
+| CORR-002 | Correlation-adjusted Greeks | `get_correlation_adjusted_greeks()` | `test_correlation_service.py` | `test_correlation_adjusted_greeks_*` |
+| CORR-003 | Diversification ratio calculation | `calculate_diversification_ratio()` | `test_correlation_service.py` | `test_diversification_ratio_*` |
+| CORR-004 | Correlation stress testing | `run_stress_test()` | `test_correlation_service.py` | `test_stress_scenarios_*` |
+| CORR-005 | Predefined crisis scenarios | Crisis scenarios | `test_correlation_service.py` | `test_lehman_scenario`, `test_covid_scenario` |
+| CORR-006 | Correlation update | `update_correlation()` | `test_correlation_service.py` | `test_update_correlation_*` |
+| CORR-007 | Position correlation analysis | `analyze_position_correlations()` | `test_correlation_service.py` | `test_position_correlations_*` |
+| CORR-008 | Correlation risk report | `get_correlation_risk_report()` | `test_correlation_service.py` | `test_risk_report_*` |
+
 ### API Server (api.py)
 
 | Requirement ID | Requirement Description | Endpoint | Test Coverage |
@@ -91,16 +114,24 @@ This document maps system requirements to implementation components and test cas
 | API-004 | Compute portfolio Greeks | `POST /api/portfolios/{id}/greeks` | Manual testing |
 | API-005 | Time ladder analysis | `GET /api/portfolios/{id}/time-ladder` | Manual testing |
 | API-006 | Get spot rates | `GET /api/spot-rates` | Manual testing |
-| API-007 | Get vol surface | `GET /api/vol-surface` | Manual testing |
-| API-008 | Risk summary dashboard | `GET /api/risk-summary` | Manual testing |
-| API-009 | Create trade | `POST /api/trades` | Manual testing |
-| API-010 | Delete trade | `DELETE /api/trades/{id}` | Manual testing |
-| API-011 | WebSocket real-time updates | `WS /ws/greeks` | Manual testing |
-| API-012 | Serve web UI | `GET /` | Manual testing |
+| API-007 | Get live spot rates | `GET /api/spot-rates/live` | Manual testing |
+| API-008 | Get vol surface | `GET /api/vol-surface` | Manual testing |
+| API-009 | Risk summary dashboard | `GET /api/risk-summary` | Manual testing |
+| API-010 | Create trade | `POST /api/trades` | Manual testing |
+| API-011 | Delete trade | `DELETE /api/trades/{id}` | Manual testing |
+| API-012 | WebSocket real-time updates | `WS /ws/greeks` | Manual testing |
 | API-013 | News impact analysis | `GET /api/news-impact` | Manual testing |
 | API-014 | Audit trace retrieval | `GET /api/audit/trace/{trace_id}` | Manual testing |
 | API-015 | List recent traces | `GET /api/audit/traces` | Manual testing |
 | API-016 | End trace | `POST /api/audit/trace/{trace_id}/end` | Manual testing |
+| API-017 | Correlation matrix | `GET /api/correlation-matrix` | Manual testing |
+| API-018 | Correlation risk report | `GET /api/correlation-risk-report` | Manual testing |
+| API-019 | Correlation stress scenarios | `GET /api/correlation-stress-scenarios` | Manual testing |
+| API-020 | Run correlation stress test | `POST /api/correlation-stress-test` | Manual testing |
+| API-021 | Risk attribution report | `GET /api/risk-attribution-report` | Manual testing |
+| API-022 | Spot rate alerts | `GET /api/alerts/spot-rates` | Manual testing |
+| API-023 | News exclusion | `POST /api/news/exclude` | Manual testing |
+| API-024 | Combined impact | `POST /api/impact/combined` | Manual testing |
 
 ### Data Schemas
 
@@ -112,6 +143,9 @@ This document maps system requirements to implementation components and test cas
 | `Portfolio` | Default currency, position list | `test_schemas.py` | `test_valid_portfolio`, `test_portfolio_default_currency` |
 | `PortfolioPosition` | Positive values for spot, strike, tenor | `test_schemas.py` | `test_position_spot_must_be_positive` |
 | `Greeks` | Addition operator, to_dict() | `test_schemas.py` | `test_greeks_addition`, `test_greeks_to_dict` |
+| `CorrelationMatrix` | Matrix symmetry, bounds [-1,1] | `test_schemas.py` | `test_correlation_matrix_*` |
+| `CorrelationAdjustedGreeks` | Greeks with correlation adjustments | `test_schemas.py` | `test_correlation_adjusted_greeks_*` |
+| `RiskAttributionReport` | Attribution breakdown validation | `test_schemas.py` | `test_risk_attribution_report_*` |
 
 ### Configuration
 
@@ -132,8 +166,14 @@ This document maps system requirements to implementation components and test cas
 | NN Risk Engine | `test_nn_risk_engine.py` | 25+ | Black-Scholes formulas, engine initialization, edge cases |
 | Vol Surface | `test_vol_surface.py` | 15 | Caching, shock application, interpolation |
 | News Ingestion | `test_news_ingestion.py` | 14 | Source aggregation, keyword search, health checks |
+| NLP Engine | `test_nlp_engine.py` | 10+ | Sentiment analysis, event extraction |
+| Vol Shock Model | `test_vol_shock_model.py` | 15+ | Rule-based predictions, NN forward pass, batch processing |
+| Alert Service | `test_alert_service.py` | 20+ | Risk alerts, spot alerts, rate limiting |
+| Forex Service | `test_forex_service.py` | 15+ | Rate fetching, baseline tracking |
+| Audit Service | `test_audit_service.py` | 10+ | Trace lifecycle, persistence |
+| Correlation Service | `test_correlation_service.py` | 20+ | Correlation matrix, stress testing, adjusted Greeks |
 | Schemas | `test_schemas.py` | 22 | Validation, enums, edge cases |
-| **Total** | | **76+** | |
+| **Total** | | **166+** | |
 
 ---
 
@@ -141,9 +181,9 @@ This document maps system requirements to implementation components and test cas
 
 ```
 NewsEvent → EventVector → VolShock → VolSurface (shocked) → PortfolioGreeks
-    ↑           ↑            ↑              ↑                    ↓
-    └───────────┴────────────┴──────────────┴────────────────────┘
-                           NLP Module
+     ↑           ↑            ↑              ↑                    ↓
+     └───────────┴────────────┴──────────────┴────────────────────┘
+                            NLP Module
 
 API Server (FastAPI):
     GET /api/portfolios → NNRiskEngine.compute_portfolio_greeks → PortfolioGreeks
@@ -151,6 +191,8 @@ API Server (FastAPI):
     WS /ws/greeks → NNRiskEngine.compute_portfolio_greeks → Real-time tick
     GET /api/news-with-impact → News → NLP → VolShock → Greeks (with audit persistence)
     GET /api/audit/trace/{trace_id} → Full pipeline trace from SQLite
+    GET /api/correlation-matrix → CorrelationService.get_correlation_matrix()
+    GET /api/correlation-adjusted → CorrelationService.get_correlation_adjusted_greeks()
 ```
 
 ### Audit Persistence (SQLite In-Memory)
@@ -166,6 +208,20 @@ The audit service persists the full news-to-Greeks pipeline using SQLite in-memo
 | `vol_surfaces` | Shocked surfaces | `trace_id`, `shock_id` |
 | `greeks_snapshots` | Final Greeks | `trace_id`, `vol_surface_snapshot_id` |
 
+### Correlation Service Integration
+
+The correlation service integrates with the risk engine to provide correlation-adjusted Greeks:
+
+```
+Portfolio Positions → CorrelationService.analyze_position_correlations()
+                              ↓
+              CorrelationService.get_correlation_adjusted_greeks()
+                              ↓
+                    CorrelationAdjustedGreeks
+                              ↓
+                    Dashboard Display
+```
+
 ---
 
 ## Version Control
@@ -174,3 +230,4 @@ The audit service persists the full news-to-Greeks pipeline using SQLite in-memo
 |------|---------|---------|
 | 2024-01 | 1.0.0 | Initial traceability matrix |
 | 2026-04 | 2.0.0 | Added API server traceability, updated test counts |
+| 2026-05 | 3.0.0 | Added Module 10 (Correlation Service) traceability, updated total test count to 166+ |

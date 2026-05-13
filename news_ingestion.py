@@ -13,6 +13,7 @@ import feedparser
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import json
+import os
 
 from config import config
 from schemas import NewsEvent
@@ -89,12 +90,16 @@ def get_mock_news_events() -> List[NewsEvent]:
 
 class NewsCache:
     """
-    Singleton cache for news headlines.
+    Singleton cache for news headlines with persistent file storage.
     Fetches from NewsAPI only on-demand (explicit refresh).
     Shared across all consumers to avoid duplicate API calls.
+    
+    On successful API fetch, data is persisted to a JSON file.
+    On subsequent API failures, persisted data is used as fallback.
     """
     
     _instance: Optional["NewsCache"] = None
+    _cache_file: str = "news_cache.json"
     
     def __init__(self):
         self._headlines: List[NewsEvent] = []
@@ -102,6 +107,8 @@ class NewsCache:
         self._is_fetching: bool = False
         self._fetch_error: Optional[str] = None
         self._max_age_seconds: int = 300  # 5 minutes max cache age
+        # Load persisted cache on initialization
+        self._load_from_file()
     
     @classmethod
     def get_instance(cls) -> "NewsCache":
@@ -146,6 +153,8 @@ class NewsCache:
             f"NewsCache updated with {len(headlines)} headlines",
             extra_fields={"action": "cache_updated", "count": len(headlines)}
         )
+        # Persist to file for fallback on future API failures
+        self._save_to_file()
     
     def set_error(self, error: str) -> None:
         """Set fetch error."""
@@ -157,6 +166,70 @@ class NewsCache:
         self._headlines = []
         self._last_refresh = None
         self._fetch_error = None
+    
+    def _load_from_file(self) -> bool:
+        """
+        Load cached headlines from JSON file.
+        Returns True if successfully loaded, False otherwise.
+        """
+        try:
+            if os.path.exists(self._cache_file):
+                with open(self._cache_file, 'r') as f:
+                    data = json.load(f)
+                    headlines_data = data.get("headlines", [])
+                    self._headlines = [
+                        NewsEvent(
+                            headline=h["headline"],
+                            source=h["source"],
+                            url=h.get("url", ""),
+                            published_at=datetime.fromisoformat(h["published_at"]) if h.get("published_at") else datetime.now(),
+                            content=h.get("content", "")
+                        )
+                        for h in headlines_data
+                    ]
+                    self._last_refresh = datetime.fromisoformat(data["last_refresh"]) if data.get("last_refresh") else None
+                    logger.info(
+                        f"Loaded {len(self._headlines)} headlines from cache file",
+                        extra_fields={"action": "cache_file_load", "count": len(self._headlines)}
+                    )
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to load cache from file: {e}")
+        return False
+    
+    def _save_to_file(self) -> bool:
+        """
+        Persist current headlines to JSON file.
+        Returns True if successfully saved, False otherwise.
+        """
+        try:
+            data = {
+                "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+                "headlines": [
+                    {
+                        "headline": h.headline,
+                        "source": h.source,
+                        "url": h.url,
+                        "published_at": h.published_at.isoformat() if h.published_at else None,
+                        "content": h.content
+                    }
+                    for h in self._headlines
+                ]
+            }
+            with open(self._cache_file, 'w') as f:
+                json.dump(data, f)
+            logger.info(
+                f"Saved {len(self._headlines)} headlines to cache file",
+                extra_fields={"action": "cache_file_save", "count": len(self._headlines)}
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to save cache to file: {e}")
+        return False
+    
+    def has_persisted_data(self) -> bool:
+        """Check if there is persisted data available from file."""
+        return len(self._headlines) > 0 and self._last_refresh is not None
 
 
 def get_news_cache() -> NewsCache:
@@ -250,18 +323,31 @@ class NewsAPISource(NewsSourceBase):
                         )
                         
                         if resp.status != 200:
-                            self.logger.warning(
-                                f"NewsAPI returned non-200 status for '{keyword}'",
-                                extra_fields={"keyword": keyword, "http_status": resp.status}
+                            error_body = await resp.text()
+                            self.logger.error(
+                                f"NewsAPI failed to receive news for keyword '{keyword}': HTTP status {resp.status}",
+                                extra_fields={
+                                    "keyword": keyword,
+                                    "http_status": resp.status,
+                                    "reason": f"HTTP error: received status {resp.status}",
+                                    "response_body": error_body[:500] if error_body else "empty",
+                                    "action": "news_source_failure"
+                                }
                             )
                             continue
                         
                         data = await resp.json()
                         
                         if data.get("status") != "ok":
+                            error_msg = data.get("message", "Unknown API error")
                             self.logger.error(
-                                f"NewsAPI returned error status",
-                                extra_fields={"status": data.get("status"), "message": data.get("message")}
+                                f"NewsAPI failed to receive news for keyword '{keyword}': {error_msg}",
+                                extra_fields={
+                                    "keyword": keyword,
+                                    "api_status": data.get("status"),
+                                    "reason": error_msg,
+                                    "action": "news_source_failure"
+                                }
                             )
                             continue
                         
@@ -286,14 +372,36 @@ class NewsAPISource(NewsSourceBase):
                         )
             
             except asyncio.TimeoutError:
-                self.logger.warning(
-                    f"Timeout fetching news for keyword '{keyword}'",
-                    extra_fields={"keyword": keyword, "error": "timeout"}
+                self.logger.error(
+                    f"NewsAPI failed to receive news for keyword '{keyword}': Request timeout after 10 seconds",
+                    extra_fields={
+                        "keyword": keyword,
+                        "error": "timeout",
+                        "reason": "Request timed out while fetching from NewsAPI (timeout=10s)",
+                        "action": "news_source_failure"
+                    }
+                )
+            except aiohttp.ClientError as e:
+                self.logger.error(
+                    f"NewsAPI failed to receive news for keyword '{keyword}': Client error - {type(e).__name__}",
+                    extra_fields={
+                        "keyword": keyword,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "reason": f"aiohttp client error: {str(e)}",
+                        "action": "news_source_failure"
+                    }
                 )
             except Exception as e:
                 self.logger.error(
-                    f"Error fetching news for '{keyword}'",
-                    extra_fields={"keyword": keyword, "error": str(e), "error_type": type(e).__name__}
+                    f"NewsAPI failed to receive news for keyword '{keyword}': {type(e).__name__} - {str(e)}",
+                    extra_fields={
+                        "keyword": keyword,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "reason": f"Unexpected error: {type(e).__name__}: {str(e)}",
+                        "action": "news_source_failure"
+                    }
                 )
         
         self.logger.info(
@@ -321,8 +429,16 @@ class NewsAPISource(NewsSourceBase):
                 await asyncio.sleep(poll_interval)
             
             except Exception as e:
-                self.logger.error(f"Error in stream_headlines: {e}")
-                self.logger.info("NewsAPI backoff sleep for 10s")
+                self.logger.error(
+                    f"NewsAPI stream failed to receive news: {type(e).__name__} - {str(e)}",
+                    extra_fields={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "reason": f"Stream error in NewsAPI: {type(e).__name__}: {str(e)}",
+                        "action": "news_source_failure"
+                    }
+                )
+                self.logger.info("NewsAPI backing off for 10s before retry")
                 await asyncio.sleep(10)  # Backoff on error
     
     def _parse_article(self, article: dict) -> NewsEvent:
@@ -367,7 +483,16 @@ class RSSFeedSource(NewsSourceBase):
                     self.logger.debug(f"Fetched RSS headline: {event.headline[:60]}...")
             
             except Exception as e:
-                self.logger.warning(f"Error parsing RSS feed {feed_url}: {e}")
+                self.logger.error(
+                    f"RSS feed failed to receive news from '{feed_url}': {type(e).__name__} - {str(e)}",
+                    extra_fields={
+                        "feed_url": feed_url,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "reason": f"RSS parsing failed: {type(e).__name__}: {str(e)}",
+                        "action": "news_source_failure"
+                    }
+                )
         
         return headlines
     
@@ -384,8 +509,16 @@ class RSSFeedSource(NewsSourceBase):
                 self.logger.info("RSS polling sleep for 3600s (next poll)")
             
             except Exception as e:
-                self.logger.error(f"Error in RSS stream: {e}")
-                self.logger.info("RSS backoff sleep for 60s")
+                self.logger.error(
+                    f"RSS stream failed to receive news: {type(e).__name__} - {str(e)}",
+                    extra_fields={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "reason": f"Stream error in RSS: {type(e).__name__}: {str(e)}",
+                        "action": "news_source_failure"
+                    }
+                )
+                self.logger.info("RSS backing off for 60s before retry")
                 await asyncio.sleep(60)
     
     def _parse_entry(self, entry: dict, feed_url: str) -> NewsEvent:
@@ -442,7 +575,15 @@ class BloombergSource(NewsSourceBase):
                 await asyncio.sleep(60)
                 self.logger.info("Bloomberg polling sleep for 60s (next poll)")
             except Exception as e:
-                self.logger.error(f"Bloomberg stream error: {e}")
+                self.logger.error(
+                    f"Bloomberg stream failed to receive news: {type(e).__name__} - {str(e)}",
+                    extra_fields={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "reason": f"Stream error in Bloomberg: {type(e).__name__}: {str(e)}",
+                        "action": "news_source_failure"
+                    }
+                )
                 await asyncio.sleep(10)
 
 
@@ -522,14 +663,23 @@ class NewsIngestionService:
                     extra_fields={"source": source_name, "count": len(result), "status": "success"}
                 )
             elif isinstance(result, Exception):
+                error_detail = f"{type(result).__name__}: {str(result)}"
                 sources_result_log.append({
                     "source": source_name,
                     "status": "error",
-                    "error": str(result)
+                    "error": error_detail,
+                    "reason": f"News source '{source_name}' failed to fetch: {error_detail}"
                 })
-                self.logger.warning(
-                    f"Source [{source_name}] failed",
-                    extra_fields={"source": source_name, "error": str(result), "status": "error"}
+                self.logger.error(
+                    f"Source [{source_name}] failed to receive news: {error_detail}",
+                    extra_fields={
+                        "source": source_name,
+                        "error": str(result),
+                        "error_type": type(result).__name__,
+                        "reason": f"Source '{source_name}' error: {error_detail}",
+                        "status": "error",
+                        "action": "news_source_failure"
+                    }
                 )
         
         self.logger.info(
@@ -540,6 +690,14 @@ class NewsIngestionService:
                 "sources_results": sources_result_log
             }
         )
+        
+        # Fallback to mock news if all sources returned empty
+        if not all_headlines:
+            self.logger.warning(
+                "All news sources returned empty. Using mock news events as fallback.",
+                extra_fields={"action": "using_mock_fallback"}
+            )
+            all_headlines = get_mock_news_events()
         
         # Deduplicate and update recent
         for headline in all_headlines:
@@ -578,7 +736,16 @@ class NewsIngestionService:
                 async for headline in source.stream_headlines():
                     await queue.put(headline)
             except Exception as e:
-                self.logger.error(f"Producer error from {source_name}: {e}")
+                self.logger.error(
+                    f"News producer failed to receive from '{source_name}': {type(e).__name__} - {str(e)}",
+                    extra_fields={
+                        "source_name": source_name,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "reason": f"Producer error from '{source_name}': {type(e).__name__}: {str(e)}",
+                        "action": "news_source_failure"
+                    }
+                )
         
         # Start producers
         producer_tasks = [
@@ -622,7 +789,16 @@ class NewsIngestionService:
                 )
                 yield headline
         except Exception as e:
-            self.logger.error(f"Stream error from {name}: {e}")
+            self.logger.error(
+                f"Stream from '{name}' failed to receive news: {type(e).__name__} - {str(e)}",
+                extra_fields={
+                    "source_name": name,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "reason": f"Stream error from '{name}': {type(e).__name__}: {str(e)}",
+                    "action": "news_source_failure"
+                }
+            )
     
     def get_recent_by_keyword(self, keyword: str, max_results: int = 20) -> List[NewsEvent]:
         """Get recent headlines matching keyword (uses cache)."""
@@ -649,6 +825,8 @@ class NewsIngestionService:
         """
         Refresh the news cache by fetching fresh headlines.
         Only fetches if cache is stale or force=True.
+        
+        On API failure, falls back to persisted cache data from file.
         
         This is the single point of entry for fetching news from NewsAPI.
         All consumers should use this method to get headlines.
@@ -687,7 +865,25 @@ class NewsIngestionService:
             return headlines
         except Exception as e:
             cache.set_error(str(e))
-            raise
+            self.logger.error(
+                f"Failed to fetch news from API: {e}",
+                extra_fields={"action": "api_fetch_failed", "error": str(e)}
+            )
+            # Fall back to persisted cache data
+            if cache.has_persisted_data():
+                self.logger.warning(
+                    f"Using persisted cache data ({len(cache.headlines)} headlines) as fallback",
+                    extra_fields={"action": "using_persisted_fallback", "count": len(cache.headlines)}
+                )
+                return cache.headlines
+            # If no persisted data, try mock news as final fallback
+            self.logger.warning(
+                "No persisted cache available. Using mock news as final fallback.",
+                extra_fields={"action": "using_mock_fallback"}
+            )
+            mock_headlines = get_mock_news_events()
+            cache.set_headlines(mock_headlines)
+            return mock_headlines
         finally:
             cache._is_fetching = False
     

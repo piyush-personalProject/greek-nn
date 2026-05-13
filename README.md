@@ -6,7 +6,7 @@ A real-time neural network-based portfolio risk management system with a FastAPI
 
 The GreekNN Risk System is a modular Python library designed for financial institutions to perform portfolio risk analysis. It integrates news ingestion, NLP-based event processing, volatility shock modeling, and neural network-based Greeks computation with a web-based UI.
 
-**Status:** All core Python modules implemented (1-9). FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization and news impact analysis.
+**Status:** All core Python modules implemented (1-10). FastAPI REST API server fully operational with WebSocket support for real-time Greeks visualization, news impact analysis, and correlation risk management.
 
 ## Key Features
 
@@ -20,6 +20,7 @@ The GreekNN Risk System is a modular Python library designed for financial insti
 - **Web UI**: Dashboard for portfolio management and Greeks visualization
 - **Live Forex Integration**: Real-time spot rate fetching via Alpha Vantage/Frankfurter APIs
 - **Alert System**: Spot rate movement alerts and risk limit breach monitoring
+- **Correlation Risk Management**: Cross-asset correlation analysis with stress testing scenarios
 
 ## News-Driven Risk Assessment
 
@@ -70,6 +71,7 @@ greek_nn/
 ├── services/                 # Service modules
 │   ├── alert_service.py      # Module 6: Alert System (spot rate & risk alerts)
 │   ├── audit_service.py     # Module 8: Audit Service (pipeline traceability)
+│   ├── correlation_service.py  # Module 10: Correlation Service (cross-asset correlation)
 │   ├── forex_service.py      # Module 7: Live forex spot rate integration
 │   └── risk_attribution_service.py  # Module 9: Risk Attribution (explicit percentage breakdown)
 ├── requirements.txt          # Python dependencies
@@ -99,6 +101,7 @@ greek_nn/
     ├── test_vol_shock_model.py
     ├── test_alert_service.py
     ├── test_forex_service.py
+    ├── test_correlation_service.py
     └── test_schemas.py
 ```
 
@@ -157,10 +160,15 @@ The API will be available at `http://localhost:8000`. The web UI dashboard will 
 | POST | `/api/portfolios/{id}/greeks` | Compute portfolio Greeks |
 | GET | `/api/portfolios/{id}/time-ladder` | Time ladder analysis |
 | GET | `/api/spot-rates` | Get current spot rates |
+| GET | `/api/spot-rates/live` | Get live spot rates from external APIs |
 | GET | `/api/vol-surface` | Get vol surface summary |
 | GET | `/api/risk-summary` | Dashboard risk summary |
 | GET | `/api/news` | Get recent news headlines |
 | GET | `/api/news-impact` | **Get news with calculated impact on Greeks** |
+| GET | `/api/correlation-matrix` | View current FX correlation matrix |
+| GET | `/api/correlation-risk-report` | Full correlation risk analysis |
+| GET | `/api/correlation-stress-scenarios` | Available stress scenarios |
+| POST | `/api/correlation-stress-test` | Run specific scenario stress test |
 | GET | `/api/audit/trace/{trace_id}` | Get full audit trace for pipeline execution |
 | GET | `/api/audit/traces` | List recent audit traces |
 | GET | `/api/risk-attribution-report` | Generate risk attribution report with explicit percentages |
@@ -223,6 +231,21 @@ curl "http://localhost:8000/api/portfolios/FX-PORTFOLIO-01/time-ladder?greek_typ
 
 # Get risk summary
 curl "http://localhost:8000/api/risk-summary?portfolio_id=FX-PORTFOLIO-01"
+```
+
+### Example: Correlation Risk Analysis
+
+```bash
+# View correlation matrix
+curl "http://localhost:8000/api/correlation-matrix"
+
+# Get correlation risk report
+curl "http://localhost:8000/api/correlation-risk-report?portfolio_id=FX-PORTFOLIO-01"
+
+# Run stress test
+curl -X POST "http://localhost:8000/api/correlation-stress-test" \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id": "lehman_2008", "portfolio_id": "FX-PORTFOLIO-01"}'
 ```
 
 ### Example: Compute Portfolio Risk (Python)
@@ -406,7 +429,7 @@ print(f"Tenors: {surface.tenors}")
 
 ## Architecture
 
-The system consists of 8 main modules:
+The system consists of 10 main modules:
 
 1. **News Ingestion** (`news_ingestion.py`) - Real-time headline aggregation from NewsAPI, RSS feeds
 2. **NLP Processing** (`nlp_engine.py`) - Event vector extraction using FinBERT sentiment analysis
@@ -417,6 +440,7 @@ The system consists of 8 main modules:
 7. **Forex Service** (`services/forex_service.py`) - Live forex spot rate integration with Alpha Vantage/Frankfurter APIs
 8. **Audit Service** (`services/audit_service.py`) - Full pipeline traceability via SQLite in-memory database
 9. **Risk Attribution Service** (`services/risk_attribution_service.py`) - Break down Greek changes into explicit attribution percentages
+10. **Correlation Service** (`services/correlation_service.py`) - Cross-asset correlation risk management for FX portfolios
 
 ### Logging System
 
@@ -517,6 +541,37 @@ The risk engine supports multiple computation modes:
 - **onnx** - Neural network inference (requires `models/risk_nn.onnx`)
 - **pytorch** - PyTorch model (not yet implemented)
 - **auto** - Try ONNX → PyTorch → Black-Scholes fallback chain
+
+### Correlation Service (Module 10)
+
+The Correlation Service provides cross-asset correlation risk management for FX portfolios:
+
+- **FX Correlation Matrix**: Default correlations between currency pairs (EURUSD-GBPUSD: 0.85, EURUSD-USDJPY: -0.65)
+- **Diversification Ratio**: Measures how portfolio diversification reduces overall risk
+- **Correlation-Adjusted Greeks**: Computes Greeks that account for cross-asset correlations
+- **Stress Testing**: Predefined crisis scenarios (Lehman 2008, COVID 2020, EM Stress, Risk-On/Risk-Off)
+- **News Correlation Impact**: Tracks how news events change correlations between pairs
+
+**Example: Correlation Stress Test**
+
+```bash
+# Run Lehman 2008 crisis scenario
+curl -X POST "http://localhost:8000/api/correlation-stress-test" \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id": "lehman_2008", "portfolio_id": "FX-PORTFOLIO-01"}'
+
+# Response:
+# {
+#   "scenario": "lehman_2008",
+#   "correlation_multiplier": 1.5,
+#   "stressed_correlations": {...},
+#   "impact_on_greeks": {
+#     "delta_change": -15000,
+#     "gamma_change": -800,
+#     "vega_change": -5000
+#   }
+# }
+```
 
 ### News Impact Flow
 
@@ -648,6 +703,12 @@ Trader receives live Greeks updates every second via WebSocket connection.
 ### UC-6: Trade Entry with Auto-Risk Assessment
 Dealer enters new trade and immediately sees Greeks impact before confirmation.
 
+### UC-7: Correlation Stress Testing
+Risk Manager runs Lehman 2008 crisis scenario to evaluate portfolio resilience under extreme correlation conditions.
+
+### UC-8: Correlation-Adjusted Risk Reporting
+Trader views Greeks that account for diversification benefits across correlated currency pairs.
+
 ## License
 
 This project is proprietary software. See [LICENSE](LICENSE) for details.
@@ -666,3 +727,7 @@ For issues and questions, contact the Risk Engineering team.
 | 2.1.0 | 2026-04 | Implemented Module 2 (NLP Engine with FinBERT) and Module 3 (Vol Shock Model) |
 | 2.2.0 | 2026-04 | Added news-based wireframes, use cases, and UI layouts |
 | 2.3.0 | 2026-05 | Added mobile-friendly UI, sort by category/sentiment, Greeks display at booking, spot movement alerts |
+| 2.4.0 | 2026-05 | Added Vega Impact Calculation section with detailed examples |
+| 2.5.0 | 2026-05 | Added Risk Attribution Report feature with explicit attribution percentages |
+| 2.6.0 | 2026-05 | Updated to reflect Risk Attribution Service (Module 9) |
+| 2.7.0 | 2026-05 | Added Module 10: Correlation Service for cross-asset correlation risk |

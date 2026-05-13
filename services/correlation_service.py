@@ -423,11 +423,11 @@ class CorrelationService:
                 adjusted_rhos += g1.rho * corr * combined_weight * n_pairs
         
         adjusted_greeks = Greeks(
-            delta=adjusted_deltas,
-            gamma=adjusted_gammas,
-            vega=adjusted_vegas,
-            theta=adjusted_thetas,
-            rho=adjusted_rhos
+            delta=float(adjusted_deltas),
+            gamma=float(adjusted_gammas),
+            vega=float(adjusted_vegas),
+            theta=float(adjusted_thetas),
+            rho=float(adjusted_rhos)
         )
         
         # Compute adjustments
@@ -587,18 +587,34 @@ class CorrelationService:
         """
         import hashlib
         
+        # Validate inputs
+        if not positions:
+            self.logger.warning("No positions provided for correlation risk report")
+            positions = []
+        
+        if not position_greeks:
+            self.logger.warning("No position Greeks provided, using empty dict")
+            position_greeks = {}
+        
+        self.logger.info(
+            f"Generating correlation risk report: portfolio_id={portfolio_id}, "
+            f"positions={len(positions)}, position_greeks={len(position_greeks)}"
+        )
+        
         # Compute adjusted Greeks
         adjusted = self.compute_correlation_adjusted_greeks(
             positions=positions,
             position_greeks=position_greeks,
             total_greeks=total_greeks
         )
+        self.logger.info(f"Correlation adjusted Greeks computed: adjusted_vega={adjusted.adjusted_greeks.vega}")
         
         # Diversification ratio
         div_ratio = self.compute_diversification_ratio(
             raw_greeks=total_greeks,
             adjusted_greeks=adjusted.adjusted_greeks
         )
+        self.logger.info(f"Diversification ratio: {div_ratio}")
         
         # Find highly correlated pairs and diversification opportunities
         pairs = self.get_pairs_from_portfolio(positions)
@@ -643,22 +659,22 @@ class CorrelationService:
         correlation_attribution = []
         
         if div_ratio < 0.95:  # Significant diversification benefit
-            benefit_pct = (1.0 - div_ratio) * 100
+            benefit_pct = float((1.0 - div_ratio) * 100)
             correlation_attribution.append(RiskAttributionFactor(
                 factor_type="correlation_effect",
                 source="cross_asset_correlation",
                 percentage=round(benefit_pct, 1),
                 description=f"Correlations provide diversification benefit, reducing risk by {benefit_pct:.1f}%",
-                evidence={"diversification_ratio": round(div_ratio, 3)}
+                evidence={"diversification_ratio": round(float(div_ratio), 3)}
             ))
         elif div_ratio > 1.05:  # Concentration risk
-            risk_pct = (div_ratio - 1.0) * 100
+            risk_pct = float((div_ratio - 1.0) * 100)
             correlation_attribution.append(RiskAttributionFactor(
                 factor_type="correlation_effect",
                 source="cross_asset_correlation",
                 percentage=round(risk_pct, 1),
                 description=f"Correlations increase concentration risk by {risk_pct:.1f}%",
-                evidence={"diversification_ratio": round(div_ratio, 3)}
+                evidence={"diversification_ratio": round(float(div_ratio), 3)}
             ))
         
         # Add pair-specific attributions for highly correlated pairs
@@ -666,9 +682,9 @@ class CorrelationService:
             correlation_attribution.append(RiskAttributionFactor(
                 factor_type="correlation_effect",
                 source=f"highly_correlated_pair_{hc['pair1']}_{hc['pair2']}",
-                percentage=round(abs(hc['correlation']) * 20, 1),  # Scale correlation to percentage
+                percentage=round(float(abs(hc['correlation']) * 20), 1),  # Scale correlation to percentage
                 description=f"{hc['pair1']} and {hc['pair2']} have high correlation ({hc['correlation']}), contributing to concentration risk",
-                evidence={"correlation": hc['correlation']}
+                evidence={"correlation": float(hc['correlation'])}
             ))
         
         # Generate report ID

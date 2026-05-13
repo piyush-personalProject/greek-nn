@@ -168,6 +168,13 @@ async def startup_event():
     if config.enable_news_ingestion:
         news_service = NewsIngestionService()
         logger.info("News Ingestion Service initialized")
+        
+        # Fetch initial news headlines at startup
+        try:
+            initial_news = await news_service.refresh_cache()
+            logger.info(f"Initial news fetched at startup: {len(initial_news)} headlines")
+        except Exception as e:
+            logger.warning(f"Failed to fetch initial news at startup: {e}")
     
     # Initialize Forex Service for live spot rates
     if config.enable_live_spot_rates:
@@ -2303,9 +2310,11 @@ async def get_correlation_risk_report(
                 spot_rates=_current_spot_rates,
                 risk_free_rate=0.05
             )
+            span.log(f"Baseline Greeks computed: delta={baseline_greeks.total_greeks.delta}")
             
             # 2. Get correlation service
             corr_service = get_correlation_service()
+            span.log("Correlation service retrieved")
             
             # 3. Generate correlation risk report
             report = corr_service.generate_correlation_risk_report(
@@ -2314,6 +2323,7 @@ async def get_correlation_risk_report(
                 position_greeks=baseline_greeks.position_greeks,
                 total_greeks=baseline_greeks.total_greeks
             )
+            span.log(f"Correlation risk report generated: {report.report_id}")
             
             # 4. Build response
             return {
