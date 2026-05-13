@@ -68,9 +68,11 @@ async def trace_middleware(request, call_next):
     trace_id = request.headers.get("X-Trace-ID") or None
     
     with create_trace(name=request.url.path, trace_id=trace_id) as trace:
-        # Add trace ID to response headers
         response = await call_next(request)
-        response.headers["X-Trace-ID"] = trace.trace_id
+        # Only set header on success responses (non-error status codes)
+        # Error responses may not have fully formed headers
+        if hasattr(response, 'status_code') and response.status_code < 400:
+            response.headers["X-Trace-ID"] = trace.trace_id
         return response
 
 
@@ -2289,6 +2291,7 @@ async def get_correlation_risk_report(
     - Ratio > 1.0: Concentration risk (correlations increase effective risk)
     """
     from services.correlation_service import get_correlation_service
+    from logger import get_tracer
     
     with get_tracer().start_span("correlation_risk_report", portfolio_id=portfolio_id) as span:
         global risk_engine
@@ -2325,7 +2328,43 @@ async def get_correlation_risk_report(
             )
             span.log(f"Correlation risk report generated: {report.report_id}")
             
-            # 4. Build response
+            # 4. Build response - ensure all values are JSON serializable
+            stress_tests_serialized = []
+            for st in report.stress_tests:
+                try:
+                    stress_tests_serialized.append({
+                        "scenario_id": st.scenario.scenario_id,
+                        "scenario_name": st.scenario.name,
+                        "scenario_description": st.scenario.description,
+                        "baseline_greeks": st.baseline_greeks.to_dict(),
+                        "stressed_greeks": st.stressed_greeks.to_dict(),
+                        "greeks_change": st.greeks_change.to_dict(),
+                        "change_percentages": st.change_percentages.to_dict(),
+                        "highest_impact_pairs": st.highest_impact_pairs
+                    })
+                except Exception as st_err:
+                    span.log(f"Error serializing stress test {st.scenario.scenario_id}: {st_err}", level=30)
+                    # Include error info but don't fail entire report
+                    stress_tests_serialized.append({
+                        "scenario_id": st.scenario.scenario_id,
+                        "scenario_name": st.scenario.name,
+                        "scenario_description": st.scenario.description,
+                        "error": str(st_err),
+                        "highest_impact_pairs": st.highest_impact_pairs if hasattr(st, 'highest_impact_pairs') else []
+                    })
+            
+            correlation_attribution_serialized = []
+            for f in report.correlation_attribution:
+                try:
+                    correlation_attribution_serialized.append({
+                        "factor_type": f.factor_type,
+                        "source": f.source,
+                        "percentage": f.percentage,
+                        "description": f.description
+                    })
+                except Exception as f_err:
+                    span.log(f"Error serializing attribution factor: {f_err}", level=30)
+            
             return {
                 "report_id": report.report_id,
                 "timestamp": report.timestamp.isoformat(),
@@ -2336,33 +2375,16 @@ async def get_correlation_risk_report(
                 "diversification_ratio": report.diversification_ratio,
                 "highly_correlated_pairs": report.highly_correlated_pairs,
                 "diversification_opportunities": report.diversification_opportunities,
-                "stress_tests": [
-                    {
-                        "scenario_id": st.scenario.scenario_id,
-                        "scenario_name": st.scenario.name,
-                        "scenario_description": st.scenario.description,
-                        "baseline_greeks": st.baseline_greeks.to_dict(),
-                        "stressed_greeks": st.stressed_greeks.to_dict(),
-                        "greeks_change": st.greeks_change.to_dict(),
-                        "change_percentages": st.change_percentages.to_dict(),
-                        "highest_impact_pairs": st.highest_impact_pairs
-                    }
-                    for st in report.stress_tests
-                ],
-                "correlation_attribution": [
-                    {
-                        "factor_type": f.factor_type,
-                        "source": f.source,
-                        "percentage": f.percentage,
-                        "description": f.description
-                    }
-                    for f in report.correlation_attribution
-                ]
+                "stress_tests": stress_tests_serialized,
+                "correlation_attribution": correlation_attribution_serialized
             }
+        except HTTPException:
+            raise
         except Exception as e:
             span.log(f"Failed to generate correlation risk report: {e}", level=40)
             logger.error(f"Failed to generate correlation risk report: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e))
+            # Re-raise with context for debugging
+            raise HTTPException(status_code=500, detail=f"Correlation report error: {str(e)}")
 
 
 @app.get("/api/correlation-adjusted")
@@ -2510,6 +2532,7 @@ async def get_correlation_change_report(
     Returns CorrelationChangeReport with news_correlation_impacts list.
     """
     from services.correlation_service import get_correlation_service
+    from logger import get_tracer
     
     with get_tracer().start_span("correlation_change_report", portfolio_id=portfolio_id) as span:
         corr_service = get_correlation_service()
