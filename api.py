@@ -2361,7 +2361,7 @@ async def get_correlation_risk_report(
             }
         except Exception as e:
             span.log(f"Failed to generate correlation risk report: {e}", level=40)
-            logger.error(f"Failed to generate correlation risk report: {e}")
+            logger.error(f"Failed to generate correlation risk report: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
 

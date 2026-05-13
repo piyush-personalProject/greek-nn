@@ -95,7 +95,8 @@ class NewsCache:
     Shared across all consumers to avoid duplicate API calls.
     
     On successful API fetch, data is persisted to a JSON file.
-    On subsequent API failures, persisted data is used as fallback.
+    On subsequent API failures, persisted data is used as fallback only if it was real (non-mock) data.
+    Mock data is never persisted as it should only be used when no real data exists.
     """
     
     _instance: Optional["NewsCache"] = None
@@ -107,6 +108,7 @@ class NewsCache:
         self._is_fetching: bool = False
         self._fetch_error: Optional[str] = None
         self._max_age_seconds: int = 300  # 5 minutes max cache age
+        self._is_mock_data: bool = False  # Track if current cache is mock data
         # Load persisted cache on initialization
         self._load_from_file()
     
@@ -137,24 +139,38 @@ class NewsCache:
         """Get last fetch error."""
         return self._fetch_error
     
+    @property
+    def is_mock_data(self) -> bool:
+        """Check if current cache contains mock data."""
+        return self._is_mock_data
+    
     def is_fresh(self) -> bool:
-        """Check if cache is still fresh (not expired)."""
-        if self._last_refresh is None or not self._headlines:
+        """Check if cache is still fresh (not expired) and contains real data."""
+        if self._last_refresh is None or not self._headlines or self._is_mock_data:
             return False
         age = (datetime.now() - self._last_refresh).total_seconds()
         return age < self._max_age_seconds
     
-    def set_headlines(self, headlines: List[NewsEvent]) -> None:
-        """Set cached headlines after a successful fetch."""
+    def set_headlines(self, headlines: List[NewsEvent], is_mock: bool = False) -> None:
+        """Set cached headlines after a successful fetch.
+        
+        Args:
+            headlines: List of news headlines to cache
+            is_mock: If True, this is mock data (should not be persisted)
+        """
         self._headlines = headlines
         self._last_refresh = datetime.now()
         self._fetch_error = None
+        self._is_mock_data = is_mock
         logger.info(
-            f"NewsCache updated with {len(headlines)} headlines",
-            extra_fields={"action": "cache_updated", "count": len(headlines)}
+            f"NewsCache updated with {len(headlines)} headlines (mock={is_mock})",
+            extra_fields={"action": "cache_updated", "count": len(headlines), "is_mock": is_mock}
         )
-        # Persist to file for fallback on future API failures
-        self._save_to_file()
+        # Only persist to file if this is real data, not mock data
+        if not is_mock:
+            self._save_to_file()
+        else:
+            logger.debug("Skipping persist for mock data")
     
     def set_error(self, error: str) -> None:
         """Set fetch error."""
@@ -166,11 +182,13 @@ class NewsCache:
         self._headlines = []
         self._last_refresh = None
         self._fetch_error = None
+        self._is_mock_data = False
     
     def _load_from_file(self) -> bool:
         """
         Load cached headlines from JSON file.
         Returns True if successfully loaded, False otherwise.
+        Loaded data is marked as real (non-mock) since it came from API.
         """
         try:
             if os.path.exists(self._cache_file):
@@ -188,9 +206,11 @@ class NewsCache:
                         for h in headlines_data
                     ]
                     self._last_refresh = datetime.fromisoformat(data["last_refresh"]) if data.get("last_refresh") else None
+                    # Loaded from file is real API data, not mock
+                    self._is_mock_data = False
                     logger.info(
-                        f"Loaded {len(self._headlines)} headlines from cache file",
-                        extra_fields={"action": "cache_file_load", "count": len(self._headlines)}
+                        f"Loaded {len(self._headlines)} headlines from cache file (real data)",
+                        extra_fields={"action": "cache_file_load", "count": len(self._headlines), "is_mock": False}
                     )
                     return True
         except Exception as e:
@@ -228,8 +248,8 @@ class NewsCache:
         return False
     
     def has_persisted_data(self) -> bool:
-        """Check if there is persisted data available from file."""
-        return len(self._headlines) > 0 and self._last_refresh is not None
+        """Check if there is persisted real (non-mock) data available from file."""
+        return len(self._headlines) > 0 and self._last_refresh is not None and not self._is_mock_data
 
 
 def get_news_cache() -> NewsCache:
@@ -698,6 +718,11 @@ class NewsIngestionService:
                 extra_fields={"action": "using_mock_fallback"}
             )
             all_headlines = get_mock_news_events()
+        else:
+            self.logger.info(
+                f"Fetched {len(all_headlines)} real headlines from news sources",
+                extra_fields={"action": "real_headlines_fetched", "count": len(all_headlines)}
+            )
         
         # Deduplicate and update recent
         for headline in all_headlines:
@@ -826,10 +851,13 @@ class NewsIngestionService:
         Refresh the news cache by fetching fresh headlines.
         Only fetches if cache is stale or force=True.
         
-        On API failure, falls back to persisted cache data from file.
+        Priority order:
+        1. If cache has fresh real (non-mock) data, use it
+        2. Fetch from API
+        3. If API fails and persisted real data exists, use persisted
+        4. If no real data available, use mock data as final fallback
         
-        This is the single point of entry for fetching news from NewsAPI.
-        All consumers should use this method to get headlines.
+        Mock data is never persisted to ensure it doesn't overwrite real cached data.
         
         Args:
             force: If True, bypass freshness check and fetch regardless
@@ -839,10 +867,11 @@ class NewsIngestionService:
         """
         cache = get_news_cache()
         
+        # Check if cache has fresh real data (not mock)
         if not force and cache.is_fresh():
             cache_headlines = cache.headlines
             self.logger.debug(
-                f"Using cached headlines (fresh, {len(cache_headlines)} headlines)",
+                f"Using cached real headlines (fresh, {len(cache_headlines)} headlines)",
                 extra_fields={"action": "cache_hit", "count": len(cache_headlines)}
             )
             return cache_headlines
@@ -861,7 +890,9 @@ class NewsIngestionService:
         cache._is_fetching = True
         try:
             headlines = await self.fetch_all_headlines()
-            cache.set_headlines(headlines)
+            # Check if headlines are mock (prefixed with "-mock")
+            is_mock = any(h.headline.startswith("-mock") for h in headlines) if headlines else False
+            cache.set_headlines(headlines, is_mock=is_mock)
             return headlines
         except Exception as e:
             cache.set_error(str(e))
@@ -869,20 +900,21 @@ class NewsIngestionService:
                 f"Failed to fetch news from API: {e}",
                 extra_fields={"action": "api_fetch_failed", "error": str(e)}
             )
-            # Fall back to persisted cache data
+            # Fall back to persisted cache data (only if it's real non-mock data)
             if cache.has_persisted_data():
                 self.logger.warning(
                     f"Using persisted cache data ({len(cache.headlines)} headlines) as fallback",
                     extra_fields={"action": "using_persisted_fallback", "count": len(cache.headlines)}
                 )
                 return cache.headlines
-            # If no persisted data, try mock news as final fallback
+            # If no persisted real data, try mock news as final fallback
             self.logger.warning(
-                "No persisted cache available. Using mock news as final fallback.",
+                "No persisted real data available. Using mock news as final fallback.",
                 extra_fields={"action": "using_mock_fallback"}
             )
             mock_headlines = get_mock_news_events()
-            cache.set_headlines(mock_headlines)
+            # Mark as mock so it won't be persisted
+            cache.set_headlines(mock_headlines, is_mock=True)
             return mock_headlines
         finally:
             cache._is_fetching = False
