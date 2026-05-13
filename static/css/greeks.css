@@ -163,6 +163,37 @@ body {
 }
 
 /* Spot Rates */
+.spot-source {
+    font-size: 9px;
+    padding: 2px 6px;
+    background-color: var(--accent-yellow);
+    color: #000;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.refresh-btn {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.refresh-btn:hover {
+    background-color: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: white;
+}
+
 .spot-rates {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
