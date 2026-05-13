@@ -1270,7 +1270,7 @@ async def get_combined_impact(
             # 3. Get latest news and process through NLP/Vol Shock
             vol_shock_impacts = []
             if news_service and nlp_engine and vol_shock_model and vol_surface_service:
-                headlines = await news_service.fetch_all_headlines()
+                headlines = await news_service.refresh_cache()
                 headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:5]
                 
                 for h in headlines:
@@ -1458,7 +1458,7 @@ async def get_news(
             raise HTTPException(status_code=503, detail="News service not available")
         
         try:
-            headlines = await news_service.fetch_all_headlines()
+            headlines = await news_service.refresh_cache()
             
             if keyword:
                 headlines = news_service.get_recent_by_keyword(keyword, max_results)
@@ -1539,6 +1539,37 @@ async def get_news(
             raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/news/refresh")
+async def refresh_news():
+    """
+    Force refresh the news cache.
+    
+    This endpoint allows on-demand refresh of news headlines from NewsAPI.
+    Use this when you want fresh data instead of waiting for cache expiry.
+    
+    Returns:
+        The refreshed headlines count and timestamp
+    """
+    if news_service is None:
+        raise HTTPException(status_code=503, detail="News service not available")
+    
+    try:
+        headlines = await news_service.refresh_cache(force=True)
+        from news_ingestion import get_news_cache
+        cache = get_news_cache()
+        
+        return {
+            "status": "success",
+            "message": f"Refreshed {len(headlines)} headlines",
+            "count": len(headlines),
+            "timestamp": datetime.now().isoformat(),
+            "last_refresh": cache.last_refresh.isoformat() if cache.last_refresh else None
+        }
+    except Exception as e:
+        logger.error(f"Failed to refresh news: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/news-with-impact")
 async def get_news_with_impact(
     max_results: int = 10,
@@ -1590,7 +1621,7 @@ async def get_news_with_impact(
             )
             
             # Fetch recent news ONCE
-            headlines = await news_service.fetch_all_headlines()
+            headlines = await news_service.refresh_cache()
             headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:max_results]
             original_count = len(headlines)
 
@@ -1756,7 +1787,7 @@ async def compute_greeks_with_excluded_news(
             )
             
             # Fetch all headlines
-            all_headlines = await news_service.fetch_all_headlines()
+            all_headlines = await news_service.refresh_cache()
             all_headlines = sorted(all_headlines, key=lambda x: x.published_at, reverse=True)
             
             # Filter out excluded headlines
@@ -1890,7 +1921,7 @@ async def get_news_impact(max_results: int = 10):
             )
             
             # Fetch recent news
-            headlines = await news_service.fetch_all_headlines()
+            headlines = await news_service.refresh_cache()
             headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)[:max_results]
 
             impact_results = []
@@ -2048,7 +2079,7 @@ async def get_risk_attribution_report(
             news_event = None
             
             if news_service and nlp_engine and vol_shock_model:
-                headlines = await news_service.fetch_all_headlines()
+                headlines = await news_service.refresh_cache()
                 if headlines:
                     # Get most impactful headline
                     headlines = sorted(headlines, key=lambda x: x.published_at, reverse=True)

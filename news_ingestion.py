@@ -21,6 +21,149 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 
+def get_mock_news_events() -> List[NewsEvent]:
+    """
+    Generate mock news events for testing.
+    Each headline is prefixed with '-mock' to indicate it's test data.
+    """
+    now = datetime.now()
+    return [
+        NewsEvent(
+            headline="-mock Fed signals potential rate cuts amid cooling inflation",
+            source="Mock Reuters",
+            url="https://mock.reuters.com/fed-rate-cuts",
+            published_at=now - timedelta(minutes=15),
+            content="Federal Reserve officials indicate openness to rate reductions as inflation shows signs of cooling."
+        ),
+        NewsEvent(
+            headline="-mock ECB holds rates steady at 4.5% in surprise decision",
+            source="Mock Bloomberg",
+            url="https://mock.bloomberg.com/ecb-rates",
+            published_at=now - timedelta(minutes=30),
+            content="European Central Bank maintains interest rates, surprising markets expecting a cut."
+        ),
+        NewsEvent(
+            headline="-mock US employment data beats expectations with 250K jobs added",
+            source="Mock CNBC",
+            url="https://mock.cnbc.com/jobs-report",
+            published_at=now - timedelta(minutes=45),
+            content="Non-farm payrolls significantly exceed forecasts, suggesting labor market resilience."
+        ),
+        NewsEvent(
+            headline="-mock Japan intervenes in currency markets to support yen",
+            source="Mock Nikkei",
+            url="https://mock.nikkei.com/forex-intervention",
+            published_at=now - timedelta(hours=1),
+            content="Bank of Japan conducts unexpected currency intervention as yen weakens past 155 per dollar."
+        ),
+        NewsEvent(
+            headline="-mock China manufacturing PMI contracts for third consecutive month",
+            source="Mock SCMP",
+            url="https://mock.scmp.com/china-pmi",
+            published_at=now - timedelta(hours=2),
+            content="Chinese industrial activity continues to decline, raising concerns about global demand."
+        ),
+        NewsEvent(
+            headline="-mock Oil prices surge 5% on OPEC+ production cut announcement",
+            source="Mock WSJ",
+            url="https://mock.wsj.com/oil-prices",
+            published_at=now - timedelta(hours=3),
+            content="OPEC+ agrees to deeper production cuts, sending crude futures higher."
+        ),
+        NewsEvent(
+            headline="-mock Swiss National Bank unexpectedly cuts rates by 25bps",
+            source="Mock SF",
+            url="https://mock.srf.ch/snb-rate-cut",
+            published_at=now - timedelta(hours=4),
+            content="SNB takes preemptive action against franc strength as inflation moderates."
+        ),
+        NewsEvent(
+            headline="-mock UK inflation falls to 3.2%, boosting rate cut expectations",
+            source="Mock FT",
+            url="https://mock.ft.com/uk-inflation",
+            published_at=now - timedelta(hours=5),
+            content="British consumer prices drop more than anticipated, increasing pressure on BoE."
+        ),
+    ]
+
+
+class NewsCache:
+    """
+    Singleton cache for news headlines.
+    Fetches from NewsAPI only on-demand (explicit refresh).
+    Shared across all consumers to avoid duplicate API calls.
+    """
+    
+    _instance: Optional["NewsCache"] = None
+    
+    def __init__(self):
+        self._headlines: List[NewsEvent] = []
+        self._last_refresh: Optional[datetime] = None
+        self._is_fetching: bool = False
+        self._fetch_error: Optional[str] = None
+        self._max_age_seconds: int = 300  # 5 minutes max cache age
+    
+    @classmethod
+    def get_instance(cls) -> "NewsCache":
+        """Get the singleton NewsCache instance."""
+        if cls._instance is None:
+            cls._instance = NewsCache()
+        return cls._instance
+    
+    @property
+    def headlines(self) -> List[NewsEvent]:
+        """Get cached headlines."""
+        return self._headlines
+    
+    @property
+    def last_refresh(self) -> Optional[datetime]:
+        """Get last refresh timestamp."""
+        return self._last_refresh
+    
+    @property
+    def is_fetching(self) -> bool:
+        """Check if a fetch is in progress."""
+        return self._is_fetching
+    
+    @property
+    def fetch_error(self) -> Optional[str]:
+        """Get last fetch error."""
+        return self._fetch_error
+    
+    def is_fresh(self) -> bool:
+        """Check if cache is still fresh (not expired)."""
+        if self._last_refresh is None or not self._headlines:
+            return False
+        age = (datetime.now() - self._last_refresh).total_seconds()
+        return age < self._max_age_seconds
+    
+    def set_headlines(self, headlines: List[NewsEvent]) -> None:
+        """Set cached headlines after a successful fetch."""
+        self._headlines = headlines
+        self._last_refresh = datetime.now()
+        self._fetch_error = None
+        logger.info(
+            f"NewsCache updated with {len(headlines)} headlines",
+            extra_fields={"action": "cache_updated", "count": len(headlines)}
+        )
+    
+    def set_error(self, error: str) -> None:
+        """Set fetch error."""
+        self._fetch_error = error
+        logger.warning(f"NewsCache fetch error: {error}")
+    
+    def clear(self) -> None:
+        """Clear the cache."""
+        self._headlines = []
+        self._last_refresh = None
+        self._fetch_error = None
+
+
+def get_news_cache() -> NewsCache:
+    """Get the global NewsCache instance."""
+    return NewsCache.get_instance()
+
+
 @dataclass
 class FeedSource:
     """Configuration for a news source."""
@@ -84,6 +227,7 @@ class NewsAPISource(NewsSourceBase):
                 async with aiohttp.ClientSession() as session:
                     params = {
                         "q": keyword,
+                        "from": (datetime.now() - timedelta(hours=24)).isoformat(),
                         "sortBy": "publishedAt",
                         "language": "en",
                         "apiKey": self.api_key,
@@ -481,10 +625,12 @@ class NewsIngestionService:
             self.logger.error(f"Stream error from {name}: {e}")
     
     def get_recent_by_keyword(self, keyword: str, max_results: int = 20) -> List[NewsEvent]:
-        """Get recent headlines matching keyword."""
+        """Get recent headlines matching keyword (uses cache)."""
+        cache = get_news_cache()
+        headlines = cache.headlines
         keyword_lower = keyword.lower()
         matching = [
-            h for h in self.recent_headlines.values()
+            h for h in headlines
             if keyword_lower in h.headline.lower() or keyword_lower in (h.content or "").lower()
         ]
         
@@ -493,6 +639,57 @@ class NewsIngestionService:
             key=lambda x: x.published_at,
             reverse=True
         )[:max_results]
+    
+    def get_cached_headlines(self) -> List[NewsEvent]:
+        """Get headlines from cache without fetching."""
+        cache = get_news_cache()
+        return cache.headlines
+    
+    async def refresh_cache(self, force: bool = False) -> List[NewsEvent]:
+        """
+        Refresh the news cache by fetching fresh headlines.
+        Only fetches if cache is stale or force=True.
+        
+        This is the single point of entry for fetching news from NewsAPI.
+        All consumers should use this method to get headlines.
+        
+        Args:
+            force: If True, bypass freshness check and fetch regardless
+        
+        Returns:
+            List of headlines (from cache after refresh)
+        """
+        cache = get_news_cache()
+        
+        if not force and cache.is_fresh():
+            cache_headlines = cache.headlines
+            self.logger.debug(
+                f"Using cached headlines (fresh, {len(cache_headlines)} headlines)",
+                extra_fields={"action": "cache_hit", "count": len(cache_headlines)}
+            )
+            return cache_headlines
+        
+        if cache.is_fetching:
+            self.logger.info("Fetch already in progress, waiting for result")
+            # Wait for ongoing fetch to complete
+            import time
+            for _ in range(20):  # Wait up to 2 seconds
+                time.sleep(0.1)
+                if not cache.is_fetching:
+                    break
+            return cache.headlines
+        
+        # Perform fresh fetch
+        cache._is_fetching = True
+        try:
+            headlines = await self.fetch_all_headlines()
+            cache.set_headlines(headlines)
+            return headlines
+        except Exception as e:
+            cache.set_error(str(e))
+            raise
+        finally:
+            cache._is_fetching = False
     
     def health_check(self) -> Dict[str, str]:
         """Health check for news ingestion."""
