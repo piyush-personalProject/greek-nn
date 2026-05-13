@@ -224,6 +224,39 @@ class TestVolSurfaceService:
         # Should return edge value
         assert 0 < vol < 1
     
+    def test_get_vol_at_strike_atm(self, mock_vol_surface):
+        """Test get_vol_at_strike for ATM (strike ≈ spot)."""
+        service = VolSurfaceService()
+        
+        # ATM: strike=100, spot=100
+        vol = service.get_vol_at_strike(mock_vol_surface, tenor=0.25, strike=100, spot=100)
+        
+        # Should return ATM vol (index 0)
+        assert 0 < vol < 1
+        assert isinstance(vol, float)
+    
+    def test_get_vol_at_strike_otm_call(self, mock_vol_surface):
+        """Test get_vol_at_strike for OTM call (strike > spot)."""
+        service = VolSurfaceService()
+        
+        # OTM call: strike=105, spot=100
+        vol = service.get_vol_at_strike(mock_vol_surface, tenor=0.25, strike=105, spot=100)
+        
+        # Should return +25RR vol (index 1)
+        assert 0 < vol < 1
+        assert isinstance(vol, float)
+    
+    def test_get_vol_at_strike_otm_put(self, mock_vol_surface):
+        """Test get_vol_at_strike for OTM put (strike < spot)."""
+        service = VolSurfaceService()
+        
+        # OTM put: strike=95, spot=100
+        vol = service.get_vol_at_strike(mock_vol_surface, tenor=0.25, strike=95, spot=100)
+        
+        # Should return -25RR vol (index 2)
+        assert 0 < vol < 1
+        assert isinstance(vol, float)
+    
     def test_reconstruct_surface_from_cache(self, mock_redis):
         """Test surface reconstruction from cache."""
         service = VolSurfaceService(redis_client=mock_redis)

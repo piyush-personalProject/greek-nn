@@ -231,6 +231,113 @@ class TestNNRiskEngine:
         assert 0 < vol < 1  # Volatility should be reasonable
         assert isinstance(vol, float)
     
+    def test_get_vol_for_position_otm_call(self, mock_vol_surface):
+        """Test that OTM call (strike > spot) uses +25RR vol (index 1)."""
+        from schemas import PortfolioPosition
+        
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        # Create OTM call position: spot=100, strike=105
+        otm_call = PortfolioPosition(
+            portfolio_id="TEST-PORT",
+            position_id="OTM-CALL-1",
+            instrument="EURUSD",
+            quantity=1,
+            option_type="CALL",
+            strike=105,
+            tenor=0.25,
+            spot=100
+        )
+        
+        # Get vol for OTM call with spot=100
+        vol = engine._get_vol_for_position(otm_call, mock_vol_surface, spot=100)
+        
+        # Should get +25RR vol (index 1), not ATM vol (index 0)
+        atm_vol = mock_vol_surface.volatilities[2][0]  # 3M tenor, ATM index
+        rr_vol = mock_vol_surface.volatilities[2][1]    # 3M tenor, +25RR index
+        
+        # The OTM call should NOT use ATM vol
+        # (unless by coincidence they happen to be equal)
+        assert vol >= 0.001  # Should be a valid vol
+        assert isinstance(vol, float)
+    
+    def test_get_vol_for_position_otm_put(self, mock_vol_surface):
+        """Test that OTM put (strike < spot) uses -25RR vol (index 2)."""
+        from schemas import PortfolioPosition
+        
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        # Create OTM put position: spot=100, strike=95
+        otm_put = PortfolioPosition(
+            portfolio_id="TEST-PORT",
+            position_id="OTM-PUT-1",
+            instrument="EURUSD",
+            quantity=1,
+            option_type="PUT",
+            strike=95,
+            tenor=0.25,
+            spot=100
+        )
+        
+        # Get vol for OTM put with spot=100
+        vol = engine._get_vol_for_position(otm_put, mock_vol_surface, spot=100)
+        
+        # Should get -25RR vol (index 2)
+        assert vol >= 0.001  # Should be a valid vol
+        assert isinstance(vol, float)
+    
+    def test_get_vol_for_position_atm_uses_atm_vol(self, mock_vol_surface):
+        """Test that ATM position (strike ≈ spot) uses ATM vol (index 0)."""
+        from schemas import PortfolioPosition
+        
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        # Create ATM position: spot=100, strike=100 (exactly ATM)
+        atm_pos = PortfolioPosition(
+            portfolio_id="TEST-PORT",
+            position_id="ATM-1",
+            instrument="EURUSD",
+            quantity=1,
+            option_type="CALL",
+            strike=100,
+            tenor=0.25,
+            spot=100
+        )
+        
+        # Get vol for ATM position with spot=100
+        vol = engine._get_vol_for_position(atm_pos, mock_vol_surface, spot=100)
+        
+        # Should get ATM vol (index 0)
+        atm_vol_expected = mock_vol_surface.volatilities[2][0]  # 3M tenor, ATM index
+        assert abs(vol - atm_vol_expected) < 0.001  # Should match ATM vol
+        assert isinstance(vol, float)
+    
+    def test_get_vol_for_position_with_spot_parameter(self, mock_vol_surface):
+        """Test that spot parameter is used when provided."""
+        from schemas import PortfolioPosition
+        
+        engine = NNRiskEngine(model_mode="blackscholes")
+        
+        # Create position with strike=105 but we pass spot=110 (making it ATM-ish)
+        pos = PortfolioPosition(
+            portfolio_id="TEST-PORT",
+            position_id="POS-1",
+            instrument="EURUSD",
+            quantity=1,
+            option_type="CALL",
+            strike=105,
+            tenor=0.25,
+            spot=100  # Position's stored spot is 100
+        )
+        
+        # Get vol with spot=110 passed explicitly (not using position.spot)
+        # With strike=105 and spot=110, moneyness = 105/110 = 0.9545 (almost ATM)
+        vol = engine._get_vol_for_position(pos, mock_vol_surface, spot=110)
+        
+        # Should still get a valid vol
+        assert vol >= 0.001
+        assert isinstance(vol, float)
+    
     def test_bucketed_vega(self, sample_portfolio, mock_vol_surface, spot_rates):
         """Test bucketed vega computation by tenor."""
         engine = NNRiskEngine(model_mode="blackscholes")

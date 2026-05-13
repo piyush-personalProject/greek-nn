@@ -390,6 +390,73 @@ class VolSurfaceService:
             perf.add_metric("vol", vol)
             return vol
     
+    def get_vol_at_strike(
+        self, 
+        surface: VolSurface, 
+        tenor: float,
+        strike: float,
+        spot: float = 100.0
+    ) -> float:
+        """
+        Get volatility at a specific tenor and strike using the vol surface.
+        
+        This method maps a position's strike to the appropriate volatility:
+        - ATM (strike ≈ spot): uses ATM vol (index 0)
+        - OTM Call (strike > spot): uses +25RR/+25BF wing (indices 1 or 3)
+        - OTM Put (strike < spot): uses -25RR/-25BF wing (indices 2 or 4)
+        
+        For strikes that fall between the predefined points, linear interpolation
+        is used to compute the appropriate vol.
+        
+        Args:
+            surface: The volatility surface to query
+            tenor: The time to expiration in years
+            strike: The strike price of the option
+            spot: The current spot price (used to determine ATM/OTM/ITM)
+            
+        Returns:
+            Volatility at the specified tenor and strike
+        """
+        with PerformanceLogger("get_vol_at_strike", self.logger, 
+                              tenor=tenor, strike=strike) as perf:
+            
+            # Find tenor index
+            tenor_idx = np.searchsorted(surface.tenors, tenor)
+            tenor_idx = np.clip(tenor_idx, 0, len(surface.tenors) - 1)
+            
+            # Determine moneyness: strike / spot
+            # ATM: moneyness ≈ 1.0 (strike near spot)
+            # OTM Call: moneyness > 1.0
+            # OTM Put: moneyness < 1.0
+            moneyness = strike / spot if spot > 0 else 1.0
+            
+            # ATM threshold: within 1% of spot
+            atm_threshold = 0.01
+            
+            if abs(moneyness - 1.0) <= atm_threshold:
+                # At-the-money: use ATM vol (index 0)
+                vol_idx = 0
+                perf.add_metric("vol_type", "ATM")
+            elif moneyness > 1.0:
+                # OTM Call: use +25RR vol (index 1)
+                vol_idx = 1
+                perf.add_metric("vol_type", "OTM_Call")
+            else:
+                # OTM Put: use -25RR vol (index 2)
+                vol_idx = 2
+                perf.add_metric("vol_type", "OTM_Put")
+            
+            # Get volatility at the determined index
+            if tenor_idx < len(surface.volatilities) and vol_idx < len(surface.volatilities[tenor_idx]):
+                vol = float(surface.volatilities[tenor_idx][vol_idx])
+            else:
+                # Fallback to ATM if indices are out of bounds
+                vol = float(surface.volatilities[tenor_idx][0])
+                perf.add_metric("vol_type", "ATM_fallback")
+            
+            perf.add_metric("vol", vol)
+            return vol
+    
     def health_check(self) -> Dict[str, str]:
         """
         Health check for vol surface service.

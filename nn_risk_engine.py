@@ -263,11 +263,11 @@ class NNRiskEngine:
             
             for position in portfolio.positions:
                 try:
-                    # Get vol for this position's tenor
-                    vol = self._get_vol_for_position(position, vol_surface)
-                    
                     # Get spot for this instrument
                     spot = spot_rates.get(position.instrument, position.spot)
+                    
+                    # Get vol for this position's tenor using strike-aware lookup
+                    vol = self._get_vol_for_position(position, vol_surface, spot)
                     
                     # Compute Greeks
                     greeks = self._compute_position_greeks(
@@ -467,13 +467,28 @@ class NNRiskEngine:
         )
     
     def _get_vol_for_position(self, position: PortfolioPosition, 
-                             vol_surface: VolSurface) -> float:
-        """Get volatility for position from surface."""
+                             vol_surface: VolSurface,
+                             spot: Optional[float] = None) -> float:
+        """
+        Get volatility for position from surface using strike-aware lookup.
+        
+        This method uses the position's strike to determine which vol to use:
+        - ATM (strike near spot): ATM vol (index 0)
+        - OTM Call (strike > spot): +25RR vol (index 1)
+        - OTM Put (strike < spot): -25RR vol (index 2)
+        
+        Args:
+            position: The portfolio position
+            vol_surface: The volatility surface
+            spot: Optional spot rate (uses position.spot as fallback)
+            
+        Returns:
+            Volatility appropriate for the position's strike
+        """
         # Find closest tenor
         tenor_idx = np.searchsorted(vol_surface.tenors, position.tenor)
         tenor_idx = np.clip(tenor_idx, 0, len(vol_surface.tenors) - 1)
         
-        # ATM vol (strike index 0) - volatilities is list of lists, not numpy array
         if tenor_idx >= len(vol_surface.volatilities):
             self.logger.error(f"tenor_idx {tenor_idx} out of range for volatilities length {len(vol_surface.volatilities)}")
             return 0.0
@@ -481,11 +496,29 @@ class NNRiskEngine:
             self.logger.error(f"Empty volatilities at tenor_idx {tenor_idx}")
             return 0.0
         
-        vol = float(vol_surface.volatilities[tenor_idx][0])
+        # Use provided spot or fallback to position.spot, then determine vol index based on moneyness
+        effective_spot = spot if spot is not None else position.spot
+        moneyness = position.strike / effective_spot if effective_spot > 0 else 1.0
+        
+        # ATM threshold: within 1% of spot
+        atm_threshold = 0.01
+        
+        if abs(moneyness - 1.0) <= atm_threshold:
+            # At-the-money: use ATM vol (index 0)
+            vol_idx = 0
+        elif moneyness > 1.0:
+            # OTM Call: use +25RR vol (index 1)
+            vol_idx = 1
+        else:
+            # OTM Put: use -25RR vol (index 2)
+            vol_idx = 2
+        
+        vol = float(vol_surface.volatilities[tenor_idx][vol_idx])
         
         self.logger.debug(
             f"Getting vol for position {position.position_id}: "
-            f"tenor={position.tenor}, tenor_idx={tenor_idx}, vol={vol}"
+            f"tenor={position.tenor}, strike={position.strike}, spot={effective_spot}, "
+            f"moneyness={moneyness:.4f}, vol_idx={vol_idx}, vol={vol}"
         )
         
         return vol
@@ -692,8 +725,8 @@ class NNRiskEngine:
             
             for position in portfolio.positions:
                 if abs(position.tenor - tenor) < 0.01:  # Close to this tenor
-                    vol = self._get_vol_for_position(position, vol_surface)
                     spot = spot_rates.get(position.instrument, position.spot)
+                    vol = self._get_vol_for_position(position, vol_surface, spot)
                     
                     greeks = self._compute_position_greeks(
                         position, spot, vol, risk_free_rate
