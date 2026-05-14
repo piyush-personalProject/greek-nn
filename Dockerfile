@@ -24,7 +24,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM python:3.10-slim as production
 
 # Create non-root user for security
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+RUN groupadd -r appgroup && useradd -r -g appgroup -d /home/appuser -s /bin/bash appuser && \
+    mkdir -p /home/appuser && \
+    chown -R appuser:appgroup /home/appuser
 
 WORKDIR /app
 
