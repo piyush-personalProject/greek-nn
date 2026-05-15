@@ -136,8 +136,17 @@ manager = ConnectionManager()
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
+    import os
+    import threading
+    
     global risk_engine, vol_surface_service, nlp_engine, vol_shock_model, news_service, forex_service, alert_service, _current_vol_surface
     
+    # Log process info for debugging
+    pid = os.getpid()
+    thread_count = threading.active_count()
+    logger.info(f"=== STARTUP BEGIN (PID: {pid}, threads: {thread_count}) ===")
+    logger.info(f"Worker ID: {os.environ.get('GUNICORN_WORKER_ID', 'standalone')}")
+    logger.info(f"Parent PID: {os.getppid()}")
     logger.info("Initializing FX Greeks Risk API...")
     
     # Initialize audit service first (before other services that may depend on it)
@@ -226,6 +235,9 @@ async def startup_event():
         logger.error("Failed to create demo portfolio!")
     
     logger.info("FX Greeks Risk API initialized successfully")
+    
+    thread_count = threading.active_count()
+    logger.info(f"=== STARTUP COMPLETE (PID: {os.getpid()}, threads: {thread_count}) ===")
 
 
 @app.get("/api/debug/portfolio-status")

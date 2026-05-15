@@ -53,9 +53,12 @@ USER appuser
 EXPOSE 8000
 
 # Health check using FastAPI health endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+# Increased start-period to allow app to fully initialize with gunicorn prefork
+HEALTHCHECK --interval=60s --timeout=30s --start-period=30s --retries=5 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
 # Run application with gunicorn for production
 # Use 2 workers + 1 for gunicorn master = 3 processes
-CMD ["sh", "-c", "gunicorn api:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --access-logfile - --error-logfile -"]
+# --preload loads app in master before forking workers to ensure proper initialization
+# --max-requests and --max-requests-jitter prevent memory leaks from request handling
+CMD ["sh", "-c", "gunicorn api:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --access-logfile - --error-logfile - --preload --max-requests 1000 --max-requests-jitter 50"]
