@@ -198,8 +198,11 @@ class NNRiskEngine:
             if not os.path.exists(config.ml.risk_nn_model_path):
                 return False
             
+            sess_options = ort.SessionOptions()
+            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self.onnx_session = ort.InferenceSession(
                 config.ml.risk_nn_model_path,
+                sess_options,
                 providers=["CPUExecutionProvider"]
             )
             self.logger.info(f"Loaded ONNX model from {config.ml.risk_nn_model_path}")
