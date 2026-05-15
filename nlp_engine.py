@@ -95,12 +95,35 @@ class NLPEngine:
     
     def _initialize_model(self) -> None:
         """Initialize FinBERT model and tokenizer."""
+        import os
+        import shutil
+        
         try:
             self.logger.info(f"Loading FinBERT model: {self.model_name}")
             
-            # Load tokenizer and model
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+            # Set a custom cache directory to avoid permission issues
+            # Use a project-local cache directory
+            project_cache_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                ".model_cache"
+            )
+            os.makedirs(project_cache_dir, exist_ok=True)
+            
+            # Set environment variable for HuggingFace cache
+            os.environ["HF_HOME"] = project_cache_dir
+            os.environ["TRANSFORMERS_CACHE"] = project_cache_dir
+            
+            self.logger.info(f"Using model cache directory: {project_cache_dir}")
+            
+            # Load tokenizer and model with explicit cache directory
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                cache_dir=project_cache_dir
+            )
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                self.model_name,
+                cache_dir=project_cache_dir
+            )
             
             # Create sentiment analysis pipeline
             self.sentiment_pipeline = pipeline(
@@ -114,6 +137,16 @@ class NLPEngine:
             
             self.logger.info("FinBERT model loaded successfully")
             
+        except PermissionError as e:
+            self.logger.error(
+                f"PermissionError loading FinBERT model: {e}. "
+                f"Check cache directory permissions at {project_cache_dir}. "
+                f"Common causes: 1) another user downloading same model (wait); "
+                f"2) previous download was canceled (remove lock files)."
+            )
+            self.logger.warning("NLP engine will use rule-based fallback")
+            self.model = None
+            self.sentiment_pipeline = None
         except Exception as e:
             self.logger.error(f"Failed to load FinBERT model: {e}")
             self.logger.warning("NLP engine will use rule-based fallback")

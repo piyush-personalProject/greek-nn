@@ -332,9 +332,15 @@ class NewsAPISource(NewsSourceBase):
                         extra_fields={"keyword": keyword, "url": f"{self.base_url}/everything"}
                     )
                     
+                    # Use top-headlines (free tier compatible) instead of everything (requires paid)
                     async with session.get(
-                        f"{self.base_url}/everything",
-                        params=params,
+                        f"{self.base_url}/top-headlines",
+                        params={
+                            "q": keyword,
+                            "country": "us",
+                            "pageSize": 20,
+                            "apiKey": self.api_key
+                        },
                         timeout=aiohttp.ClientTimeout(total=10)
                     ) as resp:
                         self.logger.info(
