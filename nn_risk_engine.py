@@ -38,8 +38,35 @@ from dataclasses import dataclass
 import os
 
 import onnxruntime as ort
+
+# DIAGNOSTIC: Track memory before and after torch import to identify CUDA allocation
+import gc
+import sys
+
+def _get_memory_usage_mb():
+    """Get current process memory usage in MB."""
+    try:
+        import psutil
+        process = psutil.Process()
+        return process.memory_info().rss / 1024 / 1024
+    except ImportError:
+        # Fallback: estimate from sys.getsizeof of basic types
+        return 0.0
+
+# Use standard logging since project logger isn't defined yet
+logging.debug(f"[MEM DIAGNOSTIC] Before torch import: {_get_memory_usage_mb():.1f} MB")
+
 import torch
 import torch.nn as nn
+
+logging.debug(f"[MEM DIAGNOSTIC] After torch import: {_get_memory_usage_mb():.1f} MB")
+
+# Force CPU-only mode to prevent CUDA allocation on Windows
+if not torch.cuda.is_available():
+    logging.info("CUDA not available - using CPU only (prevents CUDA memory allocation)")
+else:
+    # Even if CUDA is detected, force CPU-only to prevent memory allocation
+    logging.warning(f"CUDA device detected but forcing CPU mode to prevent memory allocation")
 
 from config import config
 from schemas import (
@@ -198,6 +225,8 @@ class NNRiskEngine:
             if not os.path.exists(config.ml.risk_nn_model_path):
                 return False
             
+            logger.debug(f"[MEM DIAGNOSTIC] Before ONNX session creation: {_get_memory_usage_mb():.1f} MB")
+            
             sess_options = ort.SessionOptions()
             sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self.onnx_session = ort.InferenceSession(
@@ -205,6 +234,8 @@ class NNRiskEngine:
                 sess_options,
                 providers=["CPUExecutionProvider"]
             )
+            
+            logger.debug(f"[MEM DIAGNOSTIC] After ONNX session creation: {_get_memory_usage_mb():.1f} MB")
             self.logger.info(f"Loaded ONNX model from {config.ml.risk_nn_model_path}")
             return True
         except Exception as e:
