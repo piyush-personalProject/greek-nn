@@ -18,8 +18,21 @@ import os
 from config import config
 from schemas import NewsEvent
 from logger import get_logger
+from enterprise.rate_limiter import RateLimiter, RateLimitConfig, RateLimitStrategy
 
 logger = get_logger(__name__)
+
+
+# Create a rate limiter for NewsAPI to prevent 429 errors
+_newsapi_limiter = RateLimiter(
+    "NewsAPI",
+    RateLimitConfig(
+        requests_per_second=0.05,  # 1 request per 2 seconds to avoid rate limiting
+        burst_size=1,
+        strategy=RateLimitStrategy.TOKEN_BUCKET,
+        block_duration=60.0
+    )
+)
 
 
 def get_mock_news_events() -> List[NewsEvent]:
@@ -315,7 +328,19 @@ class NewsAPISource(NewsSourceBase):
                 extra_fields={"keyword": keyword, "action": "keyword_fetch"}
             )
             try:
-                await asyncio.sleep(0.5)  # Rate limit: 100 requests/day = 1 per 15s
+                # Wait for rate limiter before making request
+                if not _newsapi_limiter.try_wait(timeout=30.0):
+                    self.logger.warning(
+                        f"Rate limiter blocked NewsAPI request for keyword '{keyword}'",
+                        extra_fields={
+                            "keyword": keyword,
+                            "reason": "Rate limit exceeded - waited 30s for token but none available",
+                            "action": "rate_limit_blocked"
+                        }
+                    )
+                    continue
+                
+                await asyncio.sleep(0.5)  # Additional delay between requests
                 
                 async with aiohttp.ClientSession() as session:
                     params = {
@@ -348,7 +373,24 @@ class NewsAPISource(NewsSourceBase):
                             extra_fields={"keyword": keyword, "status": resp.status}
                         )
                         
-                        if resp.status != 200:
+                        if resp.status == 429:
+                            # Rate limited - check for Retry-After header
+                            retry_after = resp.headers.get('Retry-After', 'not provided')
+                            self.logger.warning(
+                                f"NewsAPI rate limited for keyword '{keyword}': HTTP status 429",
+                                extra_fields={
+                                    "keyword": keyword,
+                                    "http_status": 429,
+                                    "retry_after_header": retry_after,
+                                    "reason": "Rate limit exceeded - NewsAPI returned 429",
+                                    "action": "newsapi_rate_limited",
+                                    "total_keywords": len(self.keywords),
+                                    "current_keyword_index": i + 1
+                                }
+                            )
+                            # Continue to next keyword - no retry for this keyword
+                            continue
+                        elif resp.status != 200:
                             error_body = await resp.text()
                             self.logger.error(
                                 f"NewsAPI failed to receive news for keyword '{keyword}': HTTP status {resp.status}",

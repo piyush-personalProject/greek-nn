@@ -11,12 +11,14 @@ import threading
 import time
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, TypeVar
 from dataclasses import dataclass, field
 
 from logger import get_logger
 
 logger = get_logger(__name__)
+
+T = TypeVar('T')
 
 
 class RateLimitStrategy(Enum):
@@ -444,5 +446,3 @@ def rate_limit(
 
 
 import functools
-from typing import TypeVar
-T = TypeVar('T')
