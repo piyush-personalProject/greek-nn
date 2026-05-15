@@ -231,6 +231,9 @@ class VolShockModel:
                 sess_options,
                 providers=["CPUExecutionProvider"]
             )
+            # Confirm CPU provider is being used (suppresses GPU auto-detection warning)
+            providers = self.onnx_session.get_providers()
+            self.logger.debug(f"ONNX model loaded from {onnx_path} with providers: {providers}")
             return True
         except Exception as e:
             self.logger.debug(f"ONNX load failed: {e}")

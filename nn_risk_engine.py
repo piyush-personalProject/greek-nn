@@ -235,8 +235,10 @@ class NNRiskEngine:
                 providers=["CPUExecutionProvider"]
             )
             
+            # Confirm CPU provider is being used (suppresses GPU auto-detection warning)
+            providers = self.onnx_session.get_providers()
             logger.debug(f"[MEM DIAGNOSTIC] After ONNX session creation: {_get_memory_usage_mb():.1f} MB")
-            self.logger.info(f"Loaded ONNX model from {config.ml.risk_nn_model_path}")
+            self.logger.info(f"Loaded ONNX model from {config.ml.risk_nn_model_path} with providers: {providers}")
             return True
         except Exception as e:
             self.logger.warning(f"Failed to load ONNX model: {e}")
