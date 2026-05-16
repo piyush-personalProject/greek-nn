@@ -163,17 +163,18 @@ class VolShockModel:
         self.device = device
         self.nlp_engine = nlp_engine
         
-        # Model instances
+        # Model instances - lazily loaded to reduce memory footprint at startup
         self.onnx_session: Optional[ort.InferenceSession] = None
         self.pytorch_model: Optional[VolShockNN] = None
         self.model_mode: str = "rulebased"  # 'onnx', 'pytorch', 'rulebased'
+        self._model_loaded = False
         
         # Redis for caching predictions
         self.redis: Optional[redis.Redis] = self._init_redis()
         self._cache_ttl = 300  # 5 min
         
-        self._initialize_model()
-        self.logger.info(f"VolShockModel initialized in {self.model_mode} mode")
+        # NOTE: Model loading is deferred to first prediction to stay under memory limits
+        self.logger.info(f"VolShockModel initialized (model loading deferred)")
     
     def _init_redis(self) -> Optional[redis.Redis]:
         """Initialize Redis connection."""
@@ -264,6 +265,11 @@ class VolShockModel:
         Returns:
             VolShock with predicted deltas for each tenor
         """
+        # Lazy load model on first prediction to reduce memory footprint at startup
+        if not self._model_loaded:
+            self._initialize_model()
+            self._model_loaded = True
+        
         with PerformanceLogger("predict_shock", self.logger,
                               event_type=event_vector.event_type.value,
                               sentiment=event_vector.sentiment.value) as perf:

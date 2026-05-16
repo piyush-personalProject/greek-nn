@@ -187,9 +187,10 @@ class NNRiskEngine:
         self.onnx_session = None
         self.pytorch_model = None
         self.device = "cpu"
+        self._model_loaded = False
         
-        self._initialize_model()
-        self.logger.info(f"NNRiskEngine initialized with mode: {self.model_mode}")
+        # NOTE: Model loading is deferred to first inference to stay under memory limits
+        self.logger.info(f"NNRiskEngine initialized with mode: {self.model_mode} (model loading deferred)")
     
     def _initialize_model(self) -> None:
         """Initialize the appropriate model backend."""
@@ -567,6 +568,11 @@ class NNRiskEngine:
         risk_free_rate: float
     ) -> Greeks:
         """Compute Greeks for a single position."""
+        
+        # Lazy load model on first inference to reduce memory footprint at startup
+        if not self._model_loaded:
+            self._initialize_model()
+            self._model_loaded = True
         
         if self.model_mode == "onnx":
             return self._compute_greeks_onnx(position, spot, vol, risk_free_rate)

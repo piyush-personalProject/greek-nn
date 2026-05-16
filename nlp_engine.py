@@ -64,17 +64,18 @@ class NLPEngine:
         self.device = device
         self.redis = redis_client or self._init_redis()
         
-        # NLP pipeline
+        # NLP pipeline - lazily loaded to reduce memory footprint at startup
         self.tokenizer = None
         self.model = None
         self.sentiment_pipeline = None
+        self._model_loaded = False
         
         # Cache settings
         self._cache_ttl = 3600  # 1 hour
         self._entity_cache: Dict[str, EntityInfo] = {}
         
-        self._initialize_model()
-        self.logger.info(f"NLPEngine initialized with model: {model_name}")
+        # NOTE: Model is NOT loaded here - deferred until first use to stay under memory limits
+        self.logger.info(f"NLPEngine initialized with model: {model_name} (model loading deferred)")
     
     def _init_redis(self) -> Optional[redis.Redis]:
         """Initialize Redis connection."""
@@ -254,6 +255,11 @@ class NLPEngine:
         Returns:
             Tuple of (Sentiment enum, sentiment_score from -1 to 1)
         """
+        # Lazy load model on first use to reduce memory footprint at startup
+        if not self._model_loaded:
+            self._initialize_model()
+            self._model_loaded = True
+        
         if self.sentiment_pipeline is None:
             return self._rule_based_sentiment(text)
         
