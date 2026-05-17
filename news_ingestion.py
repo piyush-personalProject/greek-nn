@@ -683,16 +683,38 @@ class NewsIngestionService:
         else:
             self.logger.warning("NewsAPI not configured. Skipping.")
         
-        # RSS Feeds
+        # RSS Feeds - General Financial News
         mas_feeds = [
             "https://www.mas.gov.sg/news-and-publications/media-releases/rss",
         ]
         fed_feeds = [
             "https://www.federalreserve.gov/feeds/press.xml",
         ]
+        # General financial news RSS feeds
+        reuters_feeds = [
+            "https://feeds.reuters.com/reuters/businessNews",
+            "https://feeds.reuters.com/reuters/marketsNews",
+        ]
+        bloomberg_feeds = [
+            "https://www.bloomberg.com/feed/standard/feed/markets/headlines.xml",
+        ]
+        cnbc_feeds = [
+            "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+        ]
+        wsj_feeds = [
+            "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        ]
+        ft_feeds = [
+            "https://www.ft.com/news?format=rss",
+        ]
         
         self.sources["mas_rss"] = RSSFeedSource("MAS", mas_feeds)
         self.sources["fed_rss"] = RSSFeedSource("FED", fed_feeds)
+        self.sources["reuters"] = RSSFeedSource("Reuters", reuters_feeds)
+        self.sources["bloomberg"] = RSSFeedSource("Bloomberg", bloomberg_feeds)
+        self.sources["cnbc"] = RSSFeedSource("CNBC", cnbc_feeds)
+        self.sources["wsj"] = RSSFeedSource("WSJ", wsj_feeds)
+        self.sources["ft"] = RSSFeedSource("FT", ft_feeds)
         
         self.logger.info("Initialized RSS sources")
     

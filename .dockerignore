@@ -55,6 +55,6 @@ Dockerfile
 docker-compose*.yml
 
 # Misc
+.p/
 *.md
 !README.md
-.p/
